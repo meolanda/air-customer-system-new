@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>รายการงานทั้งหมด - ระบบบันทึกลูกค้าแอร์</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2196F3, #1976D2);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .filters {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .filter-group label {
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .filter-group select, .filter-group input {
+            padding: 8px 12px;
+            border: 2px solid #e1e5e9;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .jobs-grid {
+            display: grid;
+            gap: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        }
+
+        .job-card {
+            border: 1px solid #e1e5e9;
+            border-radius: 10px;
+            padding: 20px;
+            background: white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .job-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+        }
+
+        .job-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .job-id {
+            font-weight: bold;
+            color: #2196F3;
+            font-size: 16px;
+        }
+
+        .job-status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-new { background: #e3f2fd; color: #1976d2; }
+        .status-scheduled { background: #e8f5e8; color: #4caf50; }
+        .status-in-progress { background: #fff3e0; color: #ff9800; }
+        .status-done { background: #f3e5f5; color: #9c27b0; }
+        .status-cancelled { background: #ffebee; color: #f44336; }
+
+        .job-customer {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .job-details {
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .job-description {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 10px 0;
+            font-style: italic;
+        }
+
+        .job-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+            font-size: 14px;
+            color: #666;
+        }
+
+        .job-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: transform 0.2s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .btn-primary {
+            background: #2196F3;
+            color: white;
+        }
+
+        .btn-success {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #FF9800;
+            color: white;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #666;
+        }
+
+        .no-jobs {
+            text-align: center;
+            padding: 50px;
+            color: #999;
+        }
+
+        .nav-links {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+
+        .nav-links a {
+            color: #2196F3;
+            text-decoration: none;
+            margin: 0 15px;
+            font-weight: 600;
+        }
+
+        .nav-links a:hover {
+            text-decoration: underline;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 30px;
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #2196F3;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 14px;
+        }
+
+        @media (max-width: 768px) {
+            .filters {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .filter-group {
+                width: 100%;
+            }
+            
+            .jobs-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .stats {
+                flex-direction: column;
+                gap: 15px;
+            }
+        }
+
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 15% auto;
+            padding: 30px;
+            border-radius: 10px;
+            width: 80%;
+            max-width: 500px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close:hover {
+            color: black;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+
+        .form-group select, .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e1e5e9;
+            border-radius: 6px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>รายการงานทั้งหมด</h1>
+            <p>ระบบบันทึกลูกค้าแอร์</p>
+        </div>
+
+        <div class="content">
+            <div class="loading" id="loading">
+                <p>🔄 กำลังโหลดข้อมูล...</p>
+            </div>
+
+            <div id="jobsContent" style="display: none;">
+                <div class="stats" id="stats">
+                    <div class="stat-item">
+                        <div class="stat-number" id="totalJobs">0</div>
+                        <div class="stat-label">งานทั้งหมด</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number" id="pendingJobs">0</div>
+                        <div class="stat-label">รอดำเนินการ</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number" id="scheduledJobs">0</div>
+                        <div class="stat-label">นัดหมายแล้ว</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number" id="completedJobs">0</div>
+                        <div class="stat-label">เสร็จแล้ว</div>
+                    </div>
+                </div>
+
+                <div class="filters">
+                    <div class="filter-group">
+                        <label>กรองตามสถานะ:</label>
+                        <select id="statusFilter">
+                            <option value="">ทั้งหมด</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>กรองตามทีม:</label>
+                        <select id="teamFilter">
+                            <option value="">ทั้งหมด</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>ค้นหา:</label>
+                        <input type="text" id="searchFilter" placeholder="ชื่อลูกค้า, Job ID, หรือรายละเอียด">
+                    </div>
+                </div>
+
+                <div class="jobs-grid" id="jobsGrid">
+                    <!-- Jobs will be populated here -->
+                </div>
+
+                <div class="no-jobs" id="noJobs" style="display: none;">
+                    <p>ไม่พบข้อมูลงานที่ตรงกับเงื่อนไข</p>
+                </div>
+            </div>
+
+            <div class="nav-links">
+                <a href="/">เพิ่มงานใหม่</a>
+                <a href="/api/health">ตรวจสอบระบบ</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Update Status Modal -->
+    <div id="statusModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>อัพเดทสถานะงาน</h2>
+            <form id="statusForm">
+                <div class="form-group">
+                    <label for="newStatus">สถานะใหม่:</label>
+                    <select id="newStatus" required>
+                        <option value="">เลือกสถานะ</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="statusNotes">หมายเหตุ:</label>
+                    <textarea id="statusNotes" placeholder="เพิ่มหมายเหตุ (ถ้ามี)"></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">อัพเดท</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let allJobs = [];
+        let filteredJobs = [];
+        let config = {};
+        let currentJobId = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async function() {
+            await loadConfig();
+            await loadJobs();
+            setupEventListeners();
+        });
+
+        // Load configuration
+        async function loadConfig() {
+            try {
+                const response = await fetch('/api/config');
+                config = await response.json();
+                setupFilters();
+            } catch (error) {
+                console.error('Error loading config:', error);
+            }
+        }
+
+        // Setup filter options
+        function setupFilters() {
+            const statusFilter = document.getElementById('statusFilter');
+            const teamFilter = document.getElementById('teamFilter');
+            const newStatus = document.getElementById('newStatus');
+
+            // Populate status filter and modal
+            config.statuses.forEach(status => {
+                const option = document.createElement('option');
+                option.value = status;
+                option.textContent = getStatusText(status);
+                statusFilter.appendChild(option.cloneNode(true));
+                newStatus.appendChild(option);
+            });
+
+            // Populate team filter
+            config.teams.forEach(team => {
+                const option = document.createElement('option');
+                option.value = team;
+                option.textContent = team;
+                teamFilter.appendChild(option);
+            });
+        }
+
+        // Load jobs
+        async function loadJobs() {
+            try {
+                const response = await fetch('/api/jobs');
+                allJobs = await response.json();
+                filteredJobs = [...allJobs];
+                
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('jobsContent').style.display = 'block';
+                
+                updateStats();
+                displayJobs();
+            } catch (error) {
+                console.error('Error loading jobs:', error);
+                document.getElementById('loading').innerHTML = '<p>❌ ไม่สามารถโหลดข้อมูลได้</p>';
+            }
+        }
+
+        // Setup event listeners
+        function setupEventListeners() {
+            // Filters
+            document.getElementById('statusFilter').addEventListener('change', applyFilters);
+            document.getElementById('teamFilter').addEventListener('change', applyFilters);
+            document.getElementById('searchFilter').addEventListener('input', applyFilters);
+
+            // Modal
+            const modal = document.getElementById('statusModal');
+            const span = document.getElementsByClassName('close')[0];
+            
+            span.onclick = () => modal.style.display = 'none';
+            window.onclick = (event) => {
+                if (event.target == modal) {
+                    modal.style.display = 'none';
+                }
+            };
+
+            // Status form
+            document.getElementById('statusForm').addEventListener('submit', handleStatusUpdate);
+        }
+
+        // Update statistics
+        function updateStats() {
+            const total = allJobs.length;
+            const pending = allJobs.filter(job => ['New', 'Need Info', 'Ready to schedule'].includes(job.status)).length;
+            const scheduled = allJobs.filter(job => ['Scheduled', 'Rescheduled', 'In progress'].includes(job.status)).length;
+            const completed = allJobs.filter(job => ['Done', 'Closed'].includes(job.status)).length;
+
+            document.getElementById('totalJobs').textContent = total;
+            document.getElementById('pendingJobs').textContent = pending;
+            document.getElementById('scheduledJobs').textContent = scheduled;
+            document.getElementById('completedJobs').textContent = completed;
+        }
+
+        // Apply filters
+        function applyFilters() {
+            const statusFilter = document.getElementById('statusFilter').value;
+            const teamFilter = document.getElementById('teamFilter').value;
+            const searchFilter = document.getElementById('searchFilter').value.toLowerCase();
+
+            filteredJobs = allJobs.filter(job => {
+                const matchesStatus = !statusFilter || job.status === statusFilter;
+                const matchesTeam = !teamFilter || job.team === teamFilter;
+                const matchesSearch = !searchFilter || 
+                    job.customer_name.toLowerCase().includes(searchFilter) ||
+                    job.job_id.toLowerCase().includes(searchFilter) ||
+                    job.job_description.toLowerCase().includes(searchFilter);
+
+                return matchesStatus && matchesTeam && matchesSearch;
+            });
+
+            displayJobs();
+        }
+
+        // Display jobs
+        function displayJobs() {
+            const jobsGrid = document.getElementById('jobsGrid');
+            const noJobs = document.getElementById('noJobs');
+
+            if (filteredJobs.length === 0) {
+                jobsGrid.style.display = 'none';
+                noJobs.style.display = 'block';
+                return;
+            }
+
+            noJobs.style.display = 'none';
+            jobsGrid.style.display = 'grid';
+            jobsGrid.innerHTML = '';
+
+            filteredJobs.forEach(job => {
+                const jobCard = createJobCard(job);
+                jobsGrid.appendChild(jobCard);
+            });
+        }
+
+        // Create job card
+        function createJobCard(job) {
+            const card = document.createElement('div');
+            card.className = 'job-card';
+            
+            const statusClass = getStatusClass(job.status);
+            const statusText = getStatusText(job.status);
+            
+            card.innerHTML = `
+                <div class="job-header">
+                    <div class="job-id">${job.job_id}</div>
+                    <div class="job-status ${statusClass}">${statusText}</div>
+                </div>
+                
+                <div class="job-customer">${job.customer_name}</div>
+                <div class="job-details">📞 ${job.customer_phone}</div>
+                <div class="job-details">📍 ${job.customer_address}</div>
+                
+                <div class="job-description">${job.job_description}</div>
+                
+                <div class="job-meta">
+                    <span>ทีม: ${job.team}</span>
+                    <span>${formatDate(job.created_date)}</span>
+                </div>
+                
+                ${job.scheduled_date ? `
+                <div class="job-details" style="margin-top: 10px;">
+                    📅 นัดหมาย: ${formatDate(job.scheduled_date)} ${job.scheduled_time || ''}
+                </div>
+                ` : ''}
+                
+                <div class="job-actions">
+                    <button class="btn btn-primary" onclick="updateStatus('${job.job_id}')">
+                        อัพเดทสถานะ
+                    </button>
+                </div>
+            `;
+
+            return card;
+        }
+
+        // Get status class for styling
+        function getStatusClass(status) {
+            const statusMap = {
+                'New': 'status-new',
+                'Need Info': 'status-new',
+                'Ready to schedule': 'status-new',
+                'Scheduled': 'status-scheduled',
+                'Rescheduled': 'status-scheduled',
+                'In progress': 'status-in-progress',
+                'Done': 'status-done',
+                'Closed': 'status-done',
+                'Cancelled': 'status-cancelled'
+            };
+            return statusMap[status] || 'status-new';
+        }
+
+        // Get Thai status text
+        function getStatusText(status) {
+            const statusMap = {
+                'New': 'ใหม่',
+                'Need Info': 'ต้องการข้อมูลเพิ่ม',
+                'Ready to schedule': 'พร้อมนัดหมาย',
+                'Scheduled': 'นัดหมายแล้ว',
+                'Rescheduled': 'นัดหมายใหม่',
+                'Cancelled': 'ยกเลิก',
+                'In progress': 'กำลังดำเนินการ',
+                'Done': 'เสร็จแล้ว',
+                'Closed': 'ปิดงาน'
+            };
+            return statusMap[status] || status;
+        }
+
+        // Format date
+        function formatDate(dateString) {
+            if (!dateString) return '';
+            const date = new Date(dateString);
+            return date.toLocaleDateString('th-TH');
+        }
+
+        // Update status
+        function updateStatus(jobId) {
+            currentJobId = jobId;
+            document.getElementById('statusModal').style.display = 'block';
+        }
+
+        // Handle status update
+        async function handleStatusUpdate(e) {
+            e.preventDefault();
+            
+            const newStatus = document.getElementById('newStatus').value;
+            const notes = document.getElementById('statusNotes').value;
+
+            try {
+                const response = await fetch(`/api/jobs/${currentJobId}/status`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ status: newStatus, notes })
+                });
+
+                if (response.ok) {
+                    document.getElementById('statusModal').style.display = 'none';
+                    await loadJobs(); // Reload jobs
+                    alert('อัพเดทสถานะเรียบร้อยแล้ว');
+                } else {
+                    throw new Error('ไม่สามารถอัพเดทสถานะได้');
+                }
+            } catch (error) {
+                console.error('Error updating status:', error);
+                alert('เกิดข้อผิดพลาดในการอัพเดทสถานะ');
+            }
+        }
+    </script>
+</body>
+</html>
