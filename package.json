@@ -20,7 +20,7 @@
     "@vercel/node": "^3.0.15"
   },
   "engines": {
-    "node": "18.x"
+    "node": "22.x"
   },
   "author": "Air Technician Team",
   "license": "MIT"
