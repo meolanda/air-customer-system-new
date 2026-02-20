@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบรับงานบริการแอร์ - Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%); min-height: 100vh; }
+    
+    .header { background: white; padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1); position: sticky; top: 0; z-index: 100; }
+    .logo { display: flex; align-items: center; gap: 12px; }
+    .logo-icon { width: 44px; height: 44px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center; color: white; font-size: 22px; box-shadow: 0 4px 6px rgba(37, 99, 235, 0.3); }
+    .logo-text h1 { font-size: 20px; color: #0f172a; font-weight: 700; }
+    .logo-text p { font-size: 13px; color: #64748b; }
+    .btn-primary { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; padding: 12px 24px; border-radius: 12px; border: none; font-size: 15px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4); transition: all 0.2s; }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5); }
+    
+    .main { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    
+    .stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: white; border-radius: 16px; padding: 20px; border: 1px solid #e2e8f0; transition: all 0.2s; }
+    .stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
+    .stat-card .top { display: flex; justify-content: space-between; align-items: center; }
+    .stat-card .icon { font-size: 28px; }
+    .stat-card .value { font-size: 32px; font-weight: 800; color: #0f172a; }
+    .stat-card .label { font-size: 13px; color: #64748b; margin-top: 8px; font-weight: 500; }
+    .stat-card.blue { border-color: #bfdbfe; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); }
+    .stat-card.blue .value { color: #2563eb; }
+    .stat-card.yellow { border-color: #fde68a; background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); }
+    .stat-card.yellow .value { color: #d97706; }
+    .stat-card.orange { border-color: #fed7aa; background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%); }
+    .stat-card.orange .value { color: #ea580c; }
+    .stat-card.green { border-color: #bbf7d0; background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); }
+    .stat-card.green .value { color: #16a34a; }
+    
+    .toolbar { background: white; border-radius: 16px; padding: 16px 20px; border: 1px solid #e2e8f0; display: flex; gap: 12px; margin-bottom: 24px; align-items: center; flex-wrap: wrap; }
+    .search-wrapper { flex: 1; min-width: 200px; position: relative; }
+    .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); font-size: 16px; }
+    .search-input { width: 100%; padding: 12px 16px 12px 42px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 14px; background: #f8fafc; transition: all 0.2s; }
+    .search-input:focus { outline: none; border-color: #3b82f6; background: white; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+    .select { padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 14px; background: #f8fafc; cursor: pointer; }
+    .btn-icon { padding: 12px 16px; border-radius: 12px; border: none; cursor: pointer; font-size: 14px; transition: all 0.2s; }
+    .btn-icon.active { background: #dbeafe; color: #2563eb; }
+    .btn-icon:not(.active) { background: #f1f5f9; color: #64748b; }
+    .btn-export { background: #dcfce7; color: #166534; font-weight: 500; }
+    .btn-export:hover { background: #bbf7d0; }
+    
+    .table-container { background: white; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+    table { width: 100%; border-collapse: collapse; }
+    thead { background: #f8fafc; }
+    th { padding: 14px 16px; text-align: left; font-size: 13px; font-weight: 600; color: #475569; text-transform: uppercase; letter-spacing: 0.5px; }
+    td { padding: 16px; border-bottom: 1px solid #f1f5f9; }
+    tr:hover { background: #f8fafc; }
+    .request-id { font-family: 'Courier New', monospace; color: #2563eb; font-weight: 600; }
+    .channel-badge { padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 500; }
+    .channel-line { background: #dcfce7; color: #166534; }
+    .channel-phone { background: #dbeafe; color: #1d4ed8; }
+    .channel-walkin { background: #f3e8ff; color: #7c3aed; }
+    .channel-facebook { background: #e0e7ff; color: #4338ca; }
+    .customer-name { font-weight: 600; color: #0f172a; }
+    .customer-phone { font-size: 12px; color: #64748b; margin-top: 2px; }
+    .status-badge { padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 500; }
+    .status-new { background: #dbeafe; color: #1e40af; }
+    .status-scheduled { background: #fef3c7; color: #92400e; }
+    .status-progress { background: #ffedd5; color: #9a3412; }
+    .status-completed { background: #dcfce7; color: #166534; }
+    .status-cancelled { background: #f1f5f9; color: #475569; }
+    .action-btn { padding: 8px; border: none; background: none; cursor: pointer; font-size: 16px; border-radius: 8px; transition: all 0.2s; }
+    .action-btn:hover { background: #f1f5f9; }
+    .action-btn.edit:hover { background: #dbeafe; }
+    .action-btn.delete:hover { background: #fee2e2; }
+    
+    .empty-state { background: white; border-radius: 16px; padding: 64px 48px; border: 1px solid #e2e8f0; text-align: center; }
+    .empty-state .icon { font-size: 80px; margin-bottom: 20px; }
+    .empty-state h3 { font-size: 22px; color: #0f172a; margin-bottom: 8px; }
+    .empty-state p { color: #64748b; margin-bottom: 24px; font-size: 15px; }
+    
+    /* Modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; padding: 24px; z-index: 1000; }
+    .modal { background: white; border-radius: 20px; width: 100%; max-width: 560px; max-height: 90vh; overflow: hidden; box-shadow: 0 25px 50px rgba(0,0,0,0.25); }
+    .modal-header { padding: 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+    .modal-header h2 { font-size: 20px; color: #0f172a; font-weight: 700; }
+    .modal-close { width: 36px; height: 36px; border-radius: 10px; border: none; font-size: 18px; cursor: pointer; color: #64748b; background: #f1f5f9; transition: all 0.2s; }
+    .modal-close:hover { background: #e2e8f0; }
+    .modal-body { padding: 24px; overflow-y: auto; max-height: 60vh; }
+    .form-group { margin-bottom: 20px; }
+    .form-label { display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 8px; }
+    .form-input { width: 100%; padding: 12px 16px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 14px; transition: all 0.2s; }
+    .form-input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .channel-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+    .channel-btn { padding: 10px 18px; border-radius: 10px; border: 2px solid transparent; font-size: 13px; cursor: pointer; background: #f1f5f9; color: #64748b; transition: all 0.2s; font-weight: 500; }
+    .channel-btn:hover { background: #e2e8f0; }
+    .channel-btn.active { background: #2563eb; color: white; border-color: #2563eb; }
+    .priority-btns { display: flex; gap: 8px; }
+    .priority-btn { flex: 1; padding: 12px; border-radius: 10px; border: 2px solid transparent; font-size: 13px; cursor: pointer; background: #f8fafc; transition: all 0.2s; font-weight: 500; }
+    .priority-btn:hover { background: #f1f5f9; }
+    .priority-btn.active { border-color: #64748b; background: white; }
+    .modal-footer { padding: 20px 24px; border-top: 1px solid #e2e8f0; display: flex; gap: 12px; }
+    .btn-cancel { flex: 1; padding: 14px; border: 2px solid #e2e8f0; border-radius: 12px; background: white; color: #64748b; cursor: pointer; font-size: 15px; font-weight: 600; transition: all 0.2s; }
+    .btn-cancel:hover { background: #f8fafc; }
+    .btn-save { flex: 1; padding: 14px; border: none; border-radius: 12px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; font-size: 15px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4); transition: all 0.2s; }
+    .btn-save:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5); }
+    
+    /* Responsive */
+    @media (max-width: 1024px) {
+      .stats { grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (max-width: 768px) {
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .toolbar { flex-direction: column; }
+      .search-wrapper { width: 100%; }
+      .form-row { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 480px) {
+      .header { flex-direction: column; gap: 16px; }
+      .btn-primary { width: 100%; justify-content: center; }
+      .stats { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="logo">
+      <div class="logo-icon">❄️</div>
+      <div class="logo-text">
+        <h1>ระบบรับงานบริการแอร์</h1>
+        <p>รวบรวมข้อมูลจากทุกช่องทางในที่เดียว</p>
+      </div>
+    </div>
+    <button class="btn-primary" onclick="openModal()">
+      <span style="font-size:18px;">+</span> เพิ่มงานใหม่
+    </button>
+  </header>
+
+  <!-- Main Content -->
+  <main class="main" id="mainContent">
+    <!-- Stats -->
+    <div class="stats">
+      <div class="stat-card">
+        <div class="top">
+          <span class="icon">📊</span>
+          <span class="value" id="statTotal">3</span>
+        </div>
+        <p class="label">ทั้งหมด</p>
+      </div>
+      <div class="stat-card blue">
+        <div class="top">
+          <span class="icon">📥</span>
+          <span class="value" id="statNew">1</span>
+        </div>
+        <p class="label">รับเรื่องใหม่</p>
+      </div>
+      <div class="stat-card yellow">
+        <div class="top">
+          <span class="icon">📅</span>
+          <span class="value" id="statScheduled">1</span>
+        </div>
+        <p class="label">นัดแล้ว</p>
+      </div>
+      <div class="stat-card orange">
+        <div class="top">
+          <span class="icon">🔧</span>
+          <span class="value" id="statProgress">0</span>
+        </div>
+        <p class="label">กำลังดำเนินการ</p>
+      </div>
+      <div class="stat-card green">
+        <div class="top">
+          <span class="icon">✅</span>
+          <span class="value" id="statCompleted">1</span>
+        </div>
+        <p class="label">เสร็จสิ้น</p>
+      </div>
+      <div class="stat-card">
+        <div class="top">
+          <span class="icon">❌</span>
+          <span class="value" id="statCancelled">0</span>
+        </div>
+        <p class="label">ยกเลิก</p>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="search-wrapper">
+        <span class="search-icon">🔍</span>
+        <input type="text" class="search-input" placeholder="ค้นหาชื่อลูกค้า, เบอร์โทร, เลขที่งาน..." id="searchInput" onkeyup="filterData()">
+      </div>
+      <select class="select" id="statusFilter" onchange="filterData()">
+        <option value="all">ทุกสถานะ</option>
+        <option value="new">📥 รับเรื่องใหม่</option>
+        <option value="scheduled">📅 นัดแล้ว</option>
+        <option value="progress">🔧 กำลังดำเนินการ</option>
+        <option value="completed">✅ เสร็จสิ้น</option>
+        <option value="cancelled">❌ ยกเลิก</option>
+      </select>
+      <button class="btn-icon active">📋</button>
+      <button class="btn-icon">📱</button>
+      <button class="btn-icon btn-export" onclick="exportCSV()">📥 Export</button>
+    </div>
+
+    <!-- Data Table -->
+    <div class="table-container" id="tableContainer">
+      <table>
+        <thead>
+          <tr>
+            <th>เลขที่งาน</th>
+            <th>วันที่</th>
+            <th>ช่องทาง</th>
+            <th>ลูกค้า</th>
+            <th>ประเภท</th>
+            <th>สถานะ</th>
+            <th style="text-align:center;">จัดการ</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody">
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Empty State (hidden by default) -->
+    <div class="empty-state" id="emptyState" style="display:none;">
+      <div class="icon">📭</div>
+      <h3>ยังไม่มีข้อมูลงาน</h3>
+      <p>เริ่มต้นด้วยการเพิ่มงานใหม่</p>
+      <button class="btn-primary" onclick="openModal()">
+        <span style="font-size:18px;">+</span> เพิ่มงานใหม่
+      </button>
+    </div>
+  </main>
+
+  <!-- Modal -->
+  <div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modalTitle">➕ เพิ่มงานใหม่</h2>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">ช่องทางที่ติดต่อ *</label>
+          <div class="channel-btns" id="channelBtns">
+            <button class="channel-btn active" data-channel="LINE">💬 LINE</button>
+            <button class="channel-btn" data-channel="Phone">📞 โทร</button>
+            <button class="channel-btn" data-channel="Walk-in">🏃 Walk-in</button>
+            <button class="channel-btn" data-channel="Facebook">📘 Facebook</button>
+            <button class="channel-btn" data-channel="Other">📌 อื่นๆ</button>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">ชื่อลูกค้า *</label>
+            <input type="text" class="form-input" id="customerName" placeholder="ชื่อ-นามสกุล">
+          </div>
+          <div class="form-group">
+            <label class="form-label">เบอร์โทร *</label>
+            <input type="tel" class="form-input" id="customerPhone" placeholder="081-234-5678">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">ที่อยู่</label>
+          <input type="text" class="form-input" id="customerAddress" placeholder="ที่อยู่สำหรับปฏิบัติงาน">
+        </div>
+        <div class="form-group">
+          <label class="form-label">ประเภทงาน</label>
+          <select class="form-input" id="serviceType">
+            <option value="ล้างแอร์">🔧 ล้างแอร์</option>
+            <option value="ซ่อม">🔨 ซ่อม</option>
+            <option value="ติดตั้ง">📦 ติดตั้ง</option>
+            <option value="ตรวจสอบ">🔍 ตรวจสอบ</option>
+            <option value="บำรุงรักษา">🛠️ บำรุงรักษา</option>
+            <option value="อื่นๆ">📋 อื่นๆ</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">รายละเอียดงาน</label>
+          <textarea class="form-input" id="description" rows="3" placeholder="อาการ/ปัญหา/ความต้องการของลูกค้า"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">ความเร่งด่วน</label>
+          <div class="priority-btns" id="priorityBtns">
+            <button class="priority-btn active" data-priority="normal">⚪ ปกติ</button>
+            <button class="priority-btn" data-priority="urgent">🟡 เร่งด่วน</button>
+            <button class="priority-btn" data-priority="emergency">🔴 ฉุกเฉิน</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">สถานะ</label>
+          <select class="form-input" id="status">
+            <option value="new">📥 รับเรื่องใหม่</option>
+            <option value="scheduled">📅 นัดแล้ว</option>
+            <option value="progress">🔧 กำลังดำเนินการ</option>
+            <option value="completed">✅ เสร็จสิ้น</option>
+            <option value="cancelled">❌ ยกเลิก</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">วันนัดหมาย</label>
+            <input type="datetime-local" class="form-input" id="appointmentDate">
+          </div>
+          <div class="form-group">
+            <label class="form-label">ราคา (บาท)</label>
+            <input type="text" class="form-input" id="price" placeholder="1,500">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-cancel" onclick="closeModal()">ยกเลิก</button>
+        <button class="btn-save" onclick="saveData()">บันทึก</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Sample data
+    let data = [
+      { id: 'REQ-20250113-001', date: '2025-01-13 10:30', channel: 'LINE', name: 'คุณสมชาย ใจดี', phone: '081-234-5678', address: '123 ถ.สุขุมวิท กรุงเทพ', type: 'ล้างแอร์', status: 'new', priority: 'normal' },
+      { id: 'REQ-20250112-002', date: '2025-01-12 15:20', channel: 'Phone', name: 'บริษัท ABC จำกัด', phone: '02-123-4567', address: 'อาคาร ABC ชั้น 5 ถ.สีลม', type: 'ซ่อม', status: 'scheduled', priority: 'urgent' },
+      { id: 'REQ-20250111-003', date: '2025-01-11 09:00', channel: 'Walk-in', name: 'คุณสมหญิง มากมี', phone: '089-876-5432', address: '456 ถ.พระราม 9 กรุงเทพ', type: 'ติดตั้ง', status: 'completed', priority: 'normal' }
+    ];
+
+    let editingId = null;
+
+    // Channel button click
+    document.querySelectorAll('.channel-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('.channel-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+      });
+    });
+
+    // Priority button click
+    document.querySelectorAll('.priority-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('.priority-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+      });
+    });
+
+    function getChannelBadge(channel) {
+      const badges = {
+        'LINE': '<span class="channel-badge channel-line">💬 LINE</span>',
+        'Phone': '<span class="channel-badge channel-phone">📞 โทร</span>',
+        'Walk-in': '<span class="channel-badge channel-walkin">🏃 Walk-in</span>',
+        'Facebook': '<span class="channel-badge channel-facebook">📘 Facebook</span>',
+        'Other': '<span class="channel-badge" style="background:#f1f5f9;color:#475569;">📌 อื่นๆ</span>'
+      };
+      return badges[channel] || badges['Other'];
+    }
+
+    function getStatusBadge(status) {
+      const badges = {
+        'new': '<span class="status-badge status-new">📥 รับเรื่องใหม่</span>',
+        'scheduled': '<span class="status-badge status-scheduled">📅 นัดแล้ว</span>',
+        'progress': '<span class="status-badge status-progress">🔧 กำลังดำเนินการ</span>',
+        'completed': '<span class="status-badge status-completed">✅ เสร็จสิ้น</span>',
+        'cancelled': '<span class="status-badge status-cancelled">❌ ยกเลิก</span>'
+      };
+      return badges[status] || badges['new'];
+    }
+
+    function formatDate(dateStr) {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function renderTable(filteredData = data) {
+      const tbody = document.getElementById('tableBody');
+      const tableContainer = document.getElementById('tableContainer');
+      const emptyState = document.getElementById('emptyState');
+
+      if (filteredData.length === 0) {
+        tableContainer.style.display = 'none';
+        emptyState.style.display = 'block';
+        return;
+      }
+
+      tableContainer.style.display = 'block';
+      emptyState.style.display = 'none';
+
+      tbody.innerHTML = filteredData.map(item => `
+        <tr>
+          <td><span class="request-id">${item.id}</span></td>
+          <td style="color:#64748b;font-size:13px;">${formatDate(item.date)}</td>
+          <td>${getChannelBadge(item.channel)}</td>
+          <td>
+            <div class="customer-name">${item.name}</div>
+            <div class="customer-phone">${item.phone}</div>
+          </td>
+          <td style="font-size:13px;">${item.type}</td>
+          <td>${getStatusBadge(item.status)}</td>
+          <td style="text-align:center;">
+            <button class="action-btn edit" onclick="editItem('${item.id}')" title="แก้ไข">✏️</button>
+            <button class="action-btn delete" onclick="deleteItem('${item.id}')" title="ลบ">🗑️</button>
+          </td>
+        </tr>
+      `).join('');
+
+      updateStats();
+    }
+
+    function updateStats() {
+      document.getElementById('statTotal').textContent = data.length;
+      document.getElementById('statNew').textContent = data.filter(d => d.status === 'new').length;
+      document.getElementById('statScheduled').textContent = data.filter(d => d.status === 'scheduled').length;
+      document.getElementById('statProgress').textContent = data.filter(d => d.status === 'progress').length;
+      document.getElementById('statCompleted').textContent = data.filter(d => d.status === 'completed').length;
+      document.getElementById('statCancelled').textContent = data.filter(d => d.status === 'cancelled').length;
+    }
+
+    function filterData() {
+      const search = document.getElementById('searchInput').value.toLowerCase();
+      const status = document.getElementById('statusFilter').value;
+
+      let filtered = data;
+
+      if (search) {
+        filtered = filtered.filter(d => 
+          d.name.toLowerCase().includes(search) || 
+          d.phone.includes(search) || 
+          d.id.toLowerCase().includes(search)
+        );
+      }
+
+      if (status !== 'all') {
+        filtered = filtered.filter(d => d.status === status);
+      }
+
+      renderTable(filtered);
+    }
+
+    function openModal() {
+      editingId = null;
+      document.getElementById('modalTitle').textContent = '➕ เพิ่มงานใหม่';
+      document.getElementById('customerName').value = '';
+      document.getElementById('customerPhone').value = '';
+      document.getElementById('customerAddress').value = '';
+      document.getElementById('serviceType').value = 'ล้างแอร์';
+      document.getElementById('description').value = '';
+      document.getElementById('status').value = 'new';
+      document.getElementById('appointmentDate').value = '';
+      document.getElementById('price').value = '';
+      document.querySelectorAll('.channel-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector('.channel-btn[data-channel="LINE"]').classList.add('active');
+      document.querySelectorAll('.priority-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector('.priority-btn[data-priority="normal"]').classList.add('active');
+      document.getElementById('modalOverlay').style.display = 'flex';
+    }
+
+    function closeModal() {
+      document.getElementById('modalOverlay').style.display = 'none';
+    }
+
+    function editItem(id) {
+      const item = data.find(d => d.id === id);
+      if (!item) return;
+
+      editingId = id;
+      document.getElementById('modalTitle').textContent = '✏️ แก้ไขงาน';
+      document.getElementById('customerName').value = item.name;
+      document.getElementById('customerPhone').value = item.phone;
+      document.getElementById('customerAddress').value = item.address || '';
+      document.getElementById('serviceType').value = item.type;
+      document.getElementById('description').value = item.description || '';
+      document.getElementById('status').value = item.status;
+      document.getElementById('price').value = item.price || '';
+
+      document.querySelectorAll('.channel-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector(`.channel-btn[data-channel="${item.channel}"]`)?.classList.add('active');
+
+      document.querySelectorAll('.priority-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector(`.priority-btn[data-priority="${item.priority}"]`)?.classList.add('active');
+
+      document.getElementById('modalOverlay').style.display = 'flex';
+    }
+
+    function saveData() {
+      const name = document.getElementById('customerName').value.trim();
+      const phone = document.getElementById('customerPhone').value.trim();
+
+      if (!name || !phone) {
+        alert('กรุณากรอกชื่อลูกค้าและเบอร์โทร');
+        return;
+      }
+
+      const channel = document.querySelector('.channel-btn.active')?.dataset.channel || 'LINE';
+      const priority = document.querySelector('.priority-btn.active')?.dataset.priority || 'normal';
+
+      if (editingId) {
+        // Update existing
+        const idx = data.findIndex(d => d.id === editingId);
+        if (idx !== -1) {
+          data[idx] = {
+            ...data[idx],
+            name, phone, channel, priority,
+            address: document.getElementById('customerAddress').value,
+            type: document.getElementById('serviceType').value,
+            description: document.getElementById('description').value,
+            status: document.getElementById('status').value,
+            price: document.getElementById('price').value
+          };
+        }
+      } else {
+        // Create new
+        const now = new Date();
+        const dateStr = now.toISOString().slice(0,10).replace(/-/g,'');
+        const count = data.filter(d => d.id.includes(dateStr)).length + 1;
+        const newId = `REQ-${dateStr}-${count.toString().padStart(3,'0')}`;
+
+        data.unshift({
+          id: newId,
+          date: now.toISOString(),
+          channel, name, phone, priority,
+          address: document.getElementById('customerAddress').value,
+          type: document.getElementById('serviceType').value,
+          description: document.getElementById('description').value,
+          status: document.getElementById('status').value,
+          price: document.getElementById('price').value
+        });
+      }
+
+      closeModal();
+      filterData();
+    }
+
+    function deleteItem(id) {
+      if (confirm('ยืนยันการลบรายการนี้?')) {
+        data = data.filter(d => d.id !== id);
+        filterData();
+      }
+    }
+
+    function exportCSV() {
+      const headers = ['เลขที่งาน', 'วันที่', 'ช่องทาง', 'ชื่อลูกค้า', 'เบอร์โทร', 'ที่อยู่', 'ประเภท', 'สถานะ'];
+      const rows = data.map(d => [d.id, d.date, d.channel, d.name, d.phone, d.address || '', d.type, d.status]);
+      const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+      const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `service-requests-${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+    }
+
+    // Initial render
+    renderTable();
+  </script>
+</body>
+</html>

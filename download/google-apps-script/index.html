@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบรับงานบริการแอร์</title>
+
+  <!-- Error handling -->
+  <script>
+    window.onerror = function (msg, url, line, col, error) {
+      console.error('Error:', msg);
+      const errorDiv = document.getElementById('error-display');
+      if (errorDiv) {
+        errorDiv.innerHTML = `
+          <div style="background: #fee; padding: 20px; border: 1px solid red; border-radius: 10px; margin: 20px;">
+            <h3 style="color: red; margin-top: 0;">❌ Error</h3>
+            <p><strong>ข้อความ:</strong> ${msg}</p>
+            ${url ? `<p><strong>URL:</strong> ${url}</p>` : ''}
+            ${line ? `<p><strong>บรรทัด:</strong> ${line}</p>` : ''}
+          </div>
+        `;
+        errorDiv.style.display = 'block';
+      }
+      return false;
+    };
+
+    // Check if Google Apps Script is loaded
+    window.addEventListener('load', function () {
+      console.log('Window loaded, checking Google Apps Script...');
+
+      setTimeout(function () {
+        // Simple check: if google object exists but script run fails, it's captured in try-catch blocks in JS
+        if (typeof google === 'undefined' || !google.script) {
+          console.error('Google Apps Script not loaded!');
+
+          document.getElementById('loading-screen').style.display = 'none';
+          document.getElementById('app').style.display = 'block';
+          document.getElementById('app').innerHTML = `
+            <div style="padding: 40px; text-align: center; font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+              <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
+              <h2 style="color: #dc2626; margin: 0 0 20px 0;">ไม่สามารถโหลด Google Apps Script</h2>
+              <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 20px; margin: 20px 0; text-align: left;">
+                <p style="color: #1f2937; margin: 0 0 12px 0; font-weight: 600;">สาเหตุที่เป็นไปได้:</p>
+                <ul style="color: #4b5563; margin: 0; padding-left: 20px; line-height: 1.8;">
+                  <li>เปิดไฟล์ HTML ในเครื่อง (ไม่ใช่ URL จาก Deploy)</li>
+                  <li>ยังไม่ได้ Deploy หรือ URL ผิด</li>
+                  <li>Internet ไม่เชื่อมต่อ</li>
+                  <li>Google Apps Script มีปัญหา</li>
+                </ul>
+              </div>
+              <button onclick="location.reload()" style="padding: 12px 24px; background: #3b82f6; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600;">
+                🔄 รีเฟรชหน้า
+              </button>
+            </div>
+          `;
+        }
+      }, 5000);
+    });
+  </script>
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Fallback CSS (Critical for when CDN fails) -->
+  <?!= include('css'); ?>
+
+</head>
+
+<body class="bg-slate-50">
+  <!-- Error display -->
+  <div id="error-display" style="display: none;"></div>
+
+  <!-- Loading screen -->
+  <div id="loading-screen">
+    <div style="text-align: center;">
+      <div class="loading loading-border" style="width: 60px; height: 60px; margin: 0 auto 20px;"></div>
+      <p style="color: #64748b; font-size: 1.125rem;">กำลังโหลด...</p>
+      <p style="color: #94a3b8; font-size: 0.875rem; margin-top: 10px;">หากหน้าว่างเปล่านานเกิน 30 วินาที ให้รีเฟรชหน้า
+      </p>
+    </div>
+  </div>
+
+  <!-- Main app container -->
+  <div id="app" style="display: none;"></div>
+
+  <?!= include('js'); ?>
+
+</body>
+
+</html>

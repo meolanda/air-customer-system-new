@@ -1,0 +1,913 @@
+<script>
+  // ==================== CONFIG ====================
+  const DEPARTMENTS = {
+    admin: { name: 'ฝ่ายแอดมิน', icon: '👤', color: 'bg-blue-500' },
+    quotation: { name: 'ฝ่ายทำใบเสนอราคา', icon: '📄', color: 'bg-green-500' },
+    procurement: { name: 'ฝ่ายจัดซื้อ', icon: '🛒', color: 'bg-orange-500' }
+  }
+
+  const STATUS_CONFIG = {
+    new: { label: 'รับเรื่องใหม่', icon: '📥', color: 'bg-slate-500' },
+    queue: { label: 'ขอคิว', icon: '📋', color: 'bg-blue-500' },
+    scheduled: { label: 'ลงปฏิทินแล้ว', icon: '📅', color: 'bg-blue-500' },
+    quotation: { label: 'ขอใบเสนอราคา', icon: '💰', color: 'bg-green-500' },
+    check_parts: { label: 'เช็คอะไหล่เสนอราคา', icon: '🔧', color: 'bg-orange-500' },
+    waiting_send: { label: 'รอส่งลูกค้า', icon: '📤', color: 'bg-amber-50' },
+    sent: { label: 'ส่งลูกค้าแล้ว', icon: '✅', color: 'bg-green-500' },
+    cancelled: { label: 'ยกเลิก', icon: '❌', color: 'bg-red-50' }
+  }
+
+  const STATUS_TRANSITIONS = {
+    new: ['queue', 'quotation', 'check_parts', 'cancelled'],
+    queue: ['scheduled', 'cancelled'],
+    scheduled: ['sent', 'cancelled'],
+    quotation: ['waiting_send', 'check_parts', 'cancelled'],
+    check_parts: ['quotation', 'cancelled'],
+    waiting_send: ['sent', 'cancelled'],
+    sent: [],
+    cancelled: []
+  }
+
+  const STATUS_BY_DEPARTMENT = {
+    admin: ['new', 'queue', 'scheduled', 'waiting_send'],
+    quotation: ['quotation'],
+    procurement: ['check_parts']
+  }
+
+  // ==================== STATE ====================
+  let state = {
+    user: null,
+    users: [],
+    requests: [],
+    isLoading: true,
+    isSaving: false,
+    isModalOpen: false,
+    editingRequest: null,
+    searchTerm: '',
+    statusFilter: 'all',
+    formData: {
+      channel: 'LINE',
+      customerName: '',
+      phone: '',
+      address: '',
+      serviceType: 'ล้างแอร์',
+      description: '',
+      priority: 'normal',
+      status: 'new',
+      appointmentDate: '',
+      notes: '',
+      imageUrl: ''
+    }
+  }
+
+  // ==================== GOOGLE APPS SCRIPT FUNCTIONS ====================
+  function googleScriptRun(func, ...args) {
+    console.log('Calling Google Script:', func, args);
+    return new Promise((resolve, reject) => {
+      try {
+        if (!google || !google.script) {
+          throw new Error('Google Apps Script not loaded');
+        }
+        console.log('google.script.run available, calling:', func);
+        google.script.run
+          .withSuccessHandler(function (result) {
+            console.log('Success:', func, result);
+            resolve(result);
+          })
+          .withFailureHandler(function (error) {
+            console.error('Google Script Error:', func, error);
+            reject(error);
+          })
+        [func](...args);
+      } catch (e) {
+        console.error('googleScriptRun error:', e);
+        reject(e);
+      }
+    });
+  }
+
+  // ==================== DATA FUNCTIONS ====================
+  async function loadData() {
+    state.isLoading = true
+    render()
+
+    try {
+      console.log('Loading data...');
+      const [users, requests] = await Promise.all([
+        googleScriptRun('getUsers'),
+        googleScriptRun('getRequests')
+      ])
+      state.users = Array.isArray(users) ? users : []
+      state.requests = Array.isArray(requests) ? requests : []
+      // console.log('Data loaded')
+    } catch (error) {
+      console.error('Load error:', error)
+      alert('โหลดข้อมูลไม่สำเร็จ: ' + error.message)
+    }
+
+    state.isLoading = false
+    render()
+  }
+
+  async function saveRequest() {
+    if (!state.formData.customerName || !state.formData.phone) {
+      alert('กรุณากรอกชื่อลูกค้าและเบอร์โทร')
+      return
+    }
+
+    state.isSaving = true
+    render()
+
+    try {
+      if (state.editingRequest) {
+        const result = await googleScriptRun('updateRequest', {
+          ...state.formData,
+          id: state.editingRequest.id,
+          by: state.user.name
+        })
+        if (result.success) {
+          const index = state.requests.findIndex(r => r.id === result.data.id)
+          if (index !== -1) {
+            state.requests[index] = result.data
+          }
+        }
+      } else {
+        const result = await googleScriptRun('addRequest', {
+          ...state.formData,
+          by: state.user.name
+        })
+        if (result.success) {
+          state.requests.unshift(result.data)
+        }
+      }
+
+      closeModal()
+
+      // Background refresh to ensure consistency
+      loadData()
+    } catch (error) {
+      console.error('Save error:', error)
+      alert('บันทึกไม่สำเร็จ: ' + error.message)
+    }
+
+    state.isSaving = false
+    render()
+  }
+
+  async function updateStatus(id, newStatus) {
+    try {
+      await googleScriptRun('updateRequest', {
+        id: id,
+        status: newStatus,
+        by: state.user.name
+      })
+      await loadData()
+    } catch (error) {
+      alert('อัปเดตไม่สำเร็จ: ' + error.message)
+    }
+  }
+
+  async function deleteRequest(id) {
+    if (!confirm('ยืนยันการลบรายการนี้?')) return
+
+    try {
+      await googleScriptRun('deleteRequest', id)
+      await loadData()
+    } catch (error) {
+      alert('ลบไม่สำเร็จ: ' + error.message)
+    }
+  }
+
+  async function handleFileUpload(event) {
+    const file = event.target.files[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = async (e) => {
+      const base64 = e.target.result
+      try {
+        const result = await googleScriptRun('uploadImage', base64, file.name)
+        if (result.success) {
+          state.formData.imageUrl = result.url
+          render()
+        } else {
+          alert('อัปโหลดรูปไม่สำเร็จ: ' + (result.error || 'Unknown error'))
+        }
+      } catch (error) {
+        alert('อัปโหลดรูปไม่สำเร็จ: ' + error.message)
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+
+  // ==================== SMART PASTE LOGIC ====================
+  window.processSmartPaste = function () {
+    const text = document.getElementById('smartPasteInput').value;
+    if (!text) return;
+
+    const lines = text.split('\n');
+    const updates = {};
+    let remainingText = text;
+
+    // 1. Phone Number (0xx-xxx-xxxx or 0xxxxxxxxx)
+    const phoneRegex = /(0\d{2}[-\s]?\d{3}[-\s]?\d{4})/;
+    const phoneMatch = text.match(phoneRegex);
+    if (phoneMatch) {
+      updates.phone = phoneMatch[0].replace(/[-\s]/g, ''); // Clean to digits
+      // Remove phone from remaining text to avoid confusing address
+      remainingText = remainingText.replace(phoneMatch[0], '');
+    }
+
+    // 2. Name (Look for keywords or assume first line if short)
+    // Strategy: Look for "คุณ", "ชื่อ", "ลูกค้า"
+    const nameRegex = /(?:คุณ|ชื่อ|ลูกค้า)\s*([^\s\n]+(?:[ \t][^\s\n]+)?)/;
+    const nameMatch = text.match(nameRegex);
+    if (nameMatch) {
+      updates.customerName = nameMatch[1];
+    } else if (lines[0].length < 30 && !phoneRegex.test(lines[0])) {
+      // Fallback: Assume first line is name if it's short and not a phone number
+      updates.customerName = lines[0].trim();
+    }
+
+    // 3. Service Type
+    if (text.includes('ล้าง')) updates.serviceType = 'ล้างแอร์';
+    else if (text.includes('ซ่อม')) updates.serviceType = 'ซ่อม';
+    else if (text.includes('ติดตั้ง')) updates.serviceType = 'ติดตั้ง';
+    else if (text.includes('เช็ค') || text.includes('ตรวจสอบ')) updates.serviceType = 'ตรวจสอบ';
+
+    // 4. Priority
+    if (text.includes('ด่วนมาก') || text.includes('ฉุกเฉิน')) updates.priority = 'emergency';
+    else if (text.includes('ด่วน')) updates.priority = 'urgent';
+
+    // 5. Address (Heuristic: Look for common address keywords in remaining text)
+    // Simplify: Just use remaining text as description, but try to extract address line if possible
+    // 5. Address (Heuristic: Look for keywords)
+    const addressKeywords = ['ที่', 'หมู่บ้าน', 'ซอย', 'ถนน', 'ถ.', 'แขวง', 'เขต', 'ต.', 'อ.', 'จ.', 'คอนโด', 'ร้าน', 'บริษัท', 'ตึก', 'อาคาร', 'ห้าง', 'บ้านเลขที่'];
+    // Try to find a line with keywords
+    let addressFound = lines.find(line => addressKeywords.some(kw => line.includes(kw)));
+
+    // logic specific for single line input with "ที่"
+    if (!addressFound && text.includes('ที่')) {
+      // Split by "ที่" and take the part after it
+      const parts = text.split('ที่');
+      if (parts.length > 1) {
+        addressFound = 'ที่ ' + parts.slice(1).join('ที่');
+      }
+    }
+
+    if (addressFound) {
+      updates.address = addressFound.trim();
+    } else {
+      // Fallback: Use remaining text as description, but if we have a significant chunk left that isn't the name, it might be address
+      // For now, let's keep it simple.
+    }
+
+    updates.description = text; // Keep full text in description for reference
+
+    // Update State
+    state.formData = { ...state.formData, ...updates };
+    render();
+  }
+
+  // ==================== UI FUNCTIONS ====================
+  window.loginById = function (id) {
+    if (!state.users) {
+      alert('Users data not loaded yet');
+      return;
+    }
+    const user = state.users.find(u => String(u.id) === String(id));
+    if (user) {
+      state.user = user;
+      loadData();
+    } else {
+      alert('User not found: ' + id);
+    }
+  }
+
+  window.logout = function () {
+    state.user = null;
+    state.requests = [];
+    render();
+  }
+
+  window.openModal = function (request = null) {
+    state.editingRequest = request;
+    state.formData = request ? { ...request } : {
+      channel: 'LINE',
+      customerName: '',
+      phone: '',
+      address: '',
+      serviceType: 'ล้างแอร์',
+      description: '',
+      priority: 'normal',
+      status: 'new',
+      appointmentDate: '',
+      notes: '',
+      imageUrl: ''
+    };
+    state.isModalOpen = true;
+    render();
+  }
+
+  window.openModalById = function (id) {
+    const request = state.requests.find(r => String(r.id) === String(id));
+    if (request) {
+      window.openModal(request);
+    } else {
+      alert('Request not found: ' + id);
+    }
+  }
+
+  window.closeModal = function () {
+    state.isModalOpen = false;
+    state.editingRequest = null;
+    render();
+  }
+
+  // Expose other functions to window
+  window.loadData = loadData;
+  window.saveRequest = saveRequest;
+  window.updateStatus = updateStatus;
+  window.deleteRequest = deleteRequest;
+  window.setChannel = function (channel) {
+    state.formData.channel = channel;
+    render();
+  };
+
+  function formatDate(dateStr) {
+    if (!dateStr) return '-'
+    try {
+      return new Date(dateStr).toLocaleDateString('th-TH', {
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    } catch (e) {
+      return dateStr
+    }
+  }
+
+  function attachEventListeners() {
+    // Search
+    const searchInput = document.getElementById('searchInput')
+    if (searchInput) {
+      searchInput.oninput = (e) => {
+        state.searchTerm = e.target.value
+        render()
+      }
+      // Restore focus
+      searchInput.focus()
+    }
+
+    // Status filter
+    const statusSelect = document.getElementById('statusSelect')
+    if (statusSelect) {
+      statusSelect.onchange = (e) => {
+        state.statusFilter = e.target.value
+        render()
+      }
+    }
+
+    // Image upload
+    const imageInput = document.getElementById('imageInput')
+    if (imageInput) {
+      imageInput.onchange = handleFileUpload
+    }
+
+    // Form fields
+    const formFields = ['customerName', 'phone', 'address', 'serviceType', 'description', 'status', 'notes', 'appointmentDate']
+    formFields.forEach(field => {
+      const el = document.getElementById(field)
+      if (el) {
+        el.oninput = (e) => { state.formData[field] = e.target.value }
+        el.onchange = (e) => { state.formData[field] = e.target.value }
+      }
+    })
+
+    // Channel buttons
+    // Handled by inline onclick="setChannel(...)" which calls render, but we need to ensure state persists.
+    // Actually setChannel updates state and re-renders, so it's fine.
+  }
+
+  // ==================== RENDER ====================
+  function render() {
+    console.log('Rendering app, user:', state.user ? state.user.name : 'none');
+    const app = document.getElementById('app')
+    const loadingScreen = document.getElementById('loading-screen')
+
+    // Hide loading screen when app is ready
+    if (app && loadingScreen) {
+      loadingScreen.style.display = 'none';
+      app.style.display = 'block';
+    } else {
+      console.error('Elements not found:', { app, loadingScreen });
+    }
+
+    if (!state.user) {
+      app.innerHTML = renderLoginPage()
+      return
+    }
+
+    // Every user sees every job
+    let filtered = state.requests || []
+
+    if (state.searchTerm) {
+      const search = state.searchTerm.toLowerCase()
+      filtered = filtered.filter(r =>
+        (r.customerName || '').toLowerCase().includes(search) ||
+        (r.phone || '').includes(search) ||
+        (r.requestNo || '').toLowerCase().includes(search)
+      )
+    }
+
+    if (state.statusFilter !== 'all') {
+      filtered = filtered.filter(r => r.status === state.statusFilter)
+    }
+
+    // Calculate stats
+    const deptRequests = state.requests || []
+    const todoStatuses = ['new', 'queue', 'quotation', 'check_parts', 'waiting_send']
+    const stats = {
+      total: deptRequests.length,
+      todo: deptRequests.filter(r => todoStatuses.includes(r.status)).length,
+      done: deptRequests.filter(r => r.status === 'sent').length
+    }
+
+    app.innerHTML = `
+        ${renderHeader()}
+        ${renderStats(stats)}
+        ${renderSearch()}
+        ${renderJobList(filtered)}
+        ${state.isModalOpen ? renderModal() : ''}
+      `
+
+    // Attach event listeners
+    attachEventListeners()
+  }
+
+  function renderLoginPage() {
+    if (!state.users || state.users.length === 0) {
+      return `
+          <div style="min-height: 100vh; background: linear-gradient(135deg, #eff6ff 0%, #e0e7ff 100%); display: flex; align-items: center; justify-content: center; padding: 20px;">
+            <div style="background: white; border-radius: 24px; padding: 40px; max-width: 400px; width: 100%; text-align: center;">
+              <h2 style="font-size: 24px; color: #1e293b; margin-bottom: 20px;">❄️ ระบบรับงานบริการแอร์</h2>
+              <p style="color: #64748b; margin-bottom: 20px;">กำลังโหลดข้อมูลผู้ใช้...</p>
+              <div class="loading loading-border" style="width: 40px; height: 40px; margin: 0 auto;"></div>
+            </div>
+          </div>
+        `;
+    }
+
+    return `
+        <div style="min-height: 100vh; background: linear-gradient(135deg, #eff6ff 0%, #e0e7ff 100%); display: flex; align-items: center; justify-content: center; padding: 20px;">
+          <div style="background: white; border-radius: 24px; padding: 32px; max-width: 400px; width: 100%; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);">
+            <div style="text-align: center; margin-bottom: 32px;">
+              <div style="width: 80px; height: 80px; background: #3b82f6; border-radius: 18px; display: flex; align-items: center; justify-content: center; font-size: 40px; margin: 0 auto 16px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);">
+                ❄️
+              </div>
+              <h1 style="font-size: 24px; font-weight: 700; color: #1e293b; margin: 0 0 8px 0;">ระบบรับงานบริการแอร์</h1>
+              <p style="color: #64748b; margin: 0;">เลือกผู้ใช้เพื่อเข้าสู่ระบบ</p>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+              <div style="background: #eff6ff; border-radius: 12px; padding: 12px; border: 1px solid #bfdbfe;">
+                <p style="font-size: 14px; font-weight: 500; color: #1d4ed8; margin: 0 0 8px 0;">👤 ฝ่ายแอดมิน</p>
+                <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;">
+                  ${state.users.filter(u => u.department === 'admin').map(u => `
+                    <button onclick="window.loginById('${u.id}')" 
+                      style="background: white; border: 1px solid #bfdbfe; padding: 12px 16px; border-radius: 10px; font-size: 14px; font-weight: 500; color: #1e293b; transition: all 0.2s;">
+                      ${u.name}
+                    </button>
+                  `).join('')}
+                </div>
+              </div>
+
+              <div style="background: #f0fdf4; border-radius: 12px; padding: 12px; border: 1px solid #bbf7d0;">
+                <p style="font-size: 14px; font-weight: 500; color: #15803d; margin: 0 0 8px 0;">📄 ฝ่ายทำใบเสนอราคา</p>
+                ${state.users.filter(u => u.department === 'quotation').map(u => `
+                  <button onclick="window.loginById('${u.id}')"
+                    style="background: white; border: 1px solid #bbf7d0; padding: 12px 16px; border-radius: 10px; font-size: 14px; font-weight: 500; color: #1e293b; transition: all 0.2s; width: 100%;">
+                    ${u.name}
+                  </button>
+                `).join('')}
+              </div>
+
+              <div style="background: #fff7ed; border-radius: 12px; padding: 12px; border: 1px solid #fed7aa;">
+                <p style="font-size: 14px; font-weight: 500; color: #c2410c; margin: 0 0 8px 0;">🛒 ฝ่ายจัดซื้อ</p>
+                ${state.users.filter(u => u.department === 'procurement').map(u => `
+                  <button onclick="window.loginById('${u.id}')"
+                    style="background: white; border: 1px solid #fed7aa; padding: 12px 16px; border-radius: 10px; font-size: 14px; font-weight: 500; color: #1e293b; transition: all 0.2s; width: 100%;">
+                    ${u.name}
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+        </div>
+      `
+  }
+
+  function renderHeader() {
+    const dept = DEPARTMENTS[state.user.department]
+    return `
+        <header style="background: white; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 40;">
+          <div style="max-width: 80rem; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <div style="width: 40px; height: 40px; background: #3b82f6; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; color: white;">❄️</div>
+              <div>
+                <h1 style="font-size: 18px; font-weight: 700; color: #1e293b; margin: 0;">ระบบรับงานบริการแอร์</h1>
+                <p style="font-size: 12px; color: #64748b; margin: 0;">${dept.icon} ${state.user.name} • ${dept.name}</p>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div style="padding: 4px 8px; border-radius: 8px; font-size: 12px; font-weight: 500; background: #dcfce7; color: #15803d;">
+                ☁️ Google Sheets
+              </div>
+              ${state.user.department === 'admin' ? `
+                <button onclick="window.openModal()" style="background: #3b82f6; color: white; padding: 12px 16px; border-radius: 12px; font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                  <span>+</span> เพิ่มงาน
+                </button>
+              ` : ''}
+              <button onclick="window.logout()" style="background: #f1f5f9; color: #64748b; padding: 12px 12px; border-radius: 12px; font-size: 14px;">
+                ออกจากระบบ
+              </button>
+            </div>
+          </div>
+        </header>
+      `
+  }
+
+  function renderStats(stats) {
+    return `
+        <main style="max-width: 80rem; margin: 0 auto; padding: 16px;">
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;">
+            <div style="background: white; border-radius: 16px; padding: 16px; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); border: 1px solid #e2e8f0;">
+              <div style="font-size: 32px; font-weight: 800; color: #1e293b;">${stats.total}</div>
+              <div style="font-size: 12px; color: #64748b; margin-top: 8px;">งานทั้งหมด</div>
+            </div>
+            <div style="background: white; border-radius: 16px; padding: 16px; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); border: 1px solid #fde68a; background: #fef3c7;">
+              <div style="font-size: 32px; font-weight: 800; color: #ca8a04;">${stats.todo}</div>
+              <div style="font-size: 12px; color: #ca8a04; margin-top: 8px;">รอดำเนินการ</div>
+            </div>
+            <div style="background: white; border-radius: 16px; padding: 16px; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); border: 1px solid #bbf7d0; background: #f0fdf4;">
+              <div style="font-size: 32px; font-weight: 800; color: #16a34a;">${stats.done}</div>
+              <div style="font-size: 12px; color: #16a34a; margin-top: 8px;">เสร็จสิ้น</div>
+            </div>
+          </div>
+        </main>
+      `
+  }
+
+  function renderSearch() {
+    return `
+        <div style="max-width: 80rem; margin: 0 auto; padding: 0 16px 16px 16px;">
+          <div style="background: white; border-radius: 16px; padding: 12px 16px; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); border: 1px solid #e2e8f0; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 200px; position: relative;">
+              <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%);">🔍</span>
+              <input type="text" id="searchInput" placeholder="ค้นหาชื่อ, เบอร์โทร, เลขที่งาน..."
+                value="${state.searchTerm}" style="padding-left: 36px; padding-right: 12px; background: #f8fafc;">
+            </div>
+            <select id="statusSelect" style="background: #f8fafc; min-width: 150px;">
+              <option value="all" ${state.statusFilter === 'all' ? 'selected' : ''}>ทุกสถานะ</option>
+              ${Object.entries(STATUS_CONFIG).map(([key, config]) => `
+                <option value="${key}" ${state.statusFilter === key ? 'selected' : ''}>${config.icon} ${config.label}</option>
+              `).join('')}
+            </select>
+            <button onclick="window.loadData()" style="padding: 12px 12px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; font-size: 14px;" title="รีเฟรช">🔄</button>
+          </div>
+        </div>
+      `
+  }
+
+  function renderModal() {
+    return `
+        <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 50;">
+          <div style="background: white; border-radius: 16px; width: 100%; max-width: 32rem; max-height: 90vh; overflow-y: auto;">
+            <div style="position: sticky; top: 0; background: white; padding: 16px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between;">
+              <h2 style="font-weight: 700; font-size: 18px; margin: 0;">${state.editingRequest ? '✏️ แก้ไขงาน' : '➕ เพิ่มงานใหม่'}</h2>
+              <button onclick="window.closeModal()" style="background: none; border: none; font-size: 20px; color: #94a3b8; padding: 4px; cursor: pointer;">✕</button>
+            </div>
+
+            <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+              
+              <!-- SMART PASTE SECTION -->
+              <div style="background: #f0fdf4; padding: 12px; border-radius: 12px; border: 1px solid #bbf7d0; margin-bottom: 8px;">
+                <label style="display: block; font-size: 14px; font-weight: 600; color: #166534; margin-bottom: 4px;">🚀 วางบรีฟงาน (Smart Paste)</label>
+                <textarea id="smartPasteInput" rows="2" style="resize: none; font-size: 12px; width: 100%; padding: 8px; border: 1px solid #bbf7d0; border-radius: 8px;" 
+                  placeholder="วางข้อความบรีฟ เช่น: คุณสมชาย 0812345678 ล้างแอร์ 2 เครื่อง ด่วน"></textarea>
+                <button type="button" onclick="window.processSmartPaste()"
+                  style="margin-top: 8px; width: 100%; padding: 8px; background: #16a34a; color: white; border-radius: 8px; font-weight: 500;">
+                  ⚡ ประมวลผลและเติมข้อมูล
+                </button>
+              </div>
+
+              <!-- Channel -->
+              <div>
+                <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 4px;">ช่องทาง</label>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                  ${['LINE', 'โทร', 'Walk-in', 'Facebook', 'อื่นๆ'].map(ch => `
+                    <button type="button" data-channel="${ch}"
+                      onclick="window.setChannel('${ch}')"
+                      style="padding: 6px 12px; border-radius: 10px; font-size: 13px; cursor: pointer; border: 1px solid ${state.formData.channel === ch ? '#3b82f6' : '#e2e8f0'}; background: ${state.formData.channel === ch ? '#eff6ff' : 'white'}; color: ${state.formData.channel === ch ? '#1d4ed8' : '#64748b'}; transition: all 0.2s;">
+                      ${ch}
+                    </button>
+                  `).join('')}
+                </div>
+              </div>
+
+              <!-- Customer Name -->
+              <div>
+                 <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 4px;">ชื่อลูกค้า <span style="color: red">*</span></label>
+                 <input type="text" id="customerName" value="${state.formData.customerName}" 
+                   style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 14px;">
+              </div>
+
+              <!-- Phone -->
+              <div>
+                 <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 4px;">เบอร์โทร <span style="color: red">*</span></label>
+                 <input type="tel" id="phone" value="${state.formData.phone}" 
+                   style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 14px;">
+              </div>
+
+              <!-- Address -->
+              <div>
+                 <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 4px;">ที่อยู่ / สถานที่</label>
+                 <textarea id="address" rows="2" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 14px; resize: none;">${state.formData.address}</textarea>
+              </div>
+
+              <!-- Service Type -->
+              <div>
+                <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 4px;">ประเภทบริการ</label>
+                <select id="serviceType" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 14px; background: white;">
+                  ${['ล้างแอร์', 'ซ่อม', 'ติดตั้ง', 'ตรวจสอบ', 'อื่นๆ'].map(t => `
+                    <option value="${t}" ${state.formData.serviceType === t ? 'selected' : ''}>${t}</option>
+                  `).join('')}
+                </select>
+              </div>
+
+              <!-- Status -->
+              <div>
+                <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 4px;">สถานะ</label>
+                <select id="status" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 14px; background: white;">
+                  ${Object.entries(STATUS_CONFIG)
+        .filter(([val]) => {
+          // If adding new job, only allow specific initial statuses
+          if (!state.editingRequest) {
+            return ['new', 'queue', 'quotation', 'check_parts'].includes(val);
+          }
+          // If editing, allow all (or logic could be refined further)
+          return true;
+        })
+        .map(([val, cfg]) => `
+                    <option value="${val}" ${state.formData.status === val ? 'selected' : ''}>${cfg.icon} ${cfg.label}</option>
+                  `).join('')}
+                </select>
+              </div>
+
+              <!-- Description -->
+               <div>
+                 <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 4px;">รายละเอียดงาน</label>
+                 <textarea id="description" rows="3" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 14px; resize: none;">${state.formData.description}</textarea>
+              </div>
+
+              <!-- Priority -->
+               <div>
+                <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 4px;">ความเร่งด่วน</label>
+                <select id="priority" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 14px; background: white;">
+                  <option value="normal" ${state.formData.priority === 'normal' ? 'selected' : ''}>🟢 ปกติ</option>
+                  <option value="urgent" ${state.formData.priority === 'urgent' ? 'selected' : ''}>🟡 เร่งด่วน</option>
+                  <option value="emergency" ${state.formData.priority === 'emergency' ? 'selected' : ''}>🔴 ฉุกเฉิน</option>
+                </select>
+              </div>
+              
+              <!-- Appointment Date -->
+               <div>
+                 <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 4px;">วันที่นัดหมาย</label>
+                 <input type="datetime-local" id="appointmentDate" value="${state.formData.appointmentDate}" 
+                   style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 14px;">
+              </div>
+
+              <!-- Notes -->
+               <div>
+                 <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 4px;">หมายเหตุ</label>
+                 <input type="text" id="notes" value="${state.formData.notes}" 
+                   style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 14px;">
+              </div>
+
+              <!-- Image Upload -->
+              <div>
+                <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 4px;">รูปภาพหน้างาน</label>
+                <input type="file" id="imageInput" accept="image/*" style="font-size: 14px;">
+                ${state.formData.imageUrl ? `
+                  <div style="margin-top: 8px;">
+                    <img src="${state.formData.imageUrl}" style="max-width: 100%; max-height: 200px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                  </div>
+                ` : ''}
+              </div>
+
+            </div>
+
+            <div style="position: sticky; bottom: 0; background: white; padding: 12px 16px; border-top: 1px solid #e2e8f0; display: flex; gap: 12px;">
+              <button onclick="window.closeModal()" style="flex: 1; padding: 12px; border-radius: 10px; background: #f1f5f9; color: #64748b; font-size: 15px; font-weight: 500;">
+                ยกเลิก
+              </button>
+              <button onclick="window.saveRequest()" ${state.isSaving ? 'disabled' : ''}
+                style="flex: 1; padding: 12px; border-radius: 10px; background: #3b82f6; color: white; font-size: 15px; font-weight: 500; opacity: ${state.isSaving ? 0.5 : 1};">
+                ${state.isSaving ? 'กำลังบันทึก...' : 'บันทึก'}
+              </button>
+            </div>
+          </div>
+        </div>
+      `
+  }
+
+  function renderJobList(requests) {
+    if (state.isLoading) {
+      return `
+          <div style="max-width: 80rem; margin: 0 auto; padding: 16px;">
+            <div style="background: white; border-radius: 16px; padding: 48px; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); border: 1px solid #e2e8f0; text-align: center;">
+              <div class="loading loading-border" style="width: 40px; height: 40px; margin: 0 auto 12px;"></div>
+              <p style="color: #64748b;">กำลังโหลดข้อมูล...</p>
+            </div>
+          </div>
+        `
+    }
+
+    if (requests.length === 0) {
+      return `
+          <div style="max-width: 80rem; margin: 0 auto; padding: 16px;">
+            <div style="background: white; border-radius: 16px; padding: 48px; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); border: 1px solid #e2e8f0; text-align: center;">
+              <div style="font-size: 48px; margin-bottom: 12px;">📭</div>
+              <p style="color: #64748b; font-size: 18px; margin: 0;">ไม่มีงานที่ต้องดำเนินการ</p>
+            </div>
+          </div>
+        `
+    }
+
+    return `
+        <div style="max-width: 80rem; margin: 0 auto; padding: 0 16px 32px 16px; display: flex; flex-direction: column; gap: 12px;">
+          ${requests.map(r => renderJobCard(r)).join('')}
+        </div>
+      `
+  }
+
+  function renderJobCard(r) {
+    const statusConfig = STATUS_CONFIG[r.status] || STATUS_CONFIG.new
+    let history = []
+    try { history = JSON.parse(r.history || '[]') } catch (e) { }
+
+    return `
+        <div style="background: white; border-radius: 16px; padding: 16px; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); border: 1px solid #e2e8f0;">
+          <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px;">
+            <div>
+              <span style="font-size: 12px; font-family: ui-monospace, monospace; color: #2563eb; font-weight: 500;">${r.requestNo || ''}</span>
+              <span style="margin: 0 8px; color: #cbd5e1;">|</span>
+              <span style="font-size: 12px; color: #64748b;">${formatDate(r.createdAt)}</span>
+            </div>
+            <span style="padding: 4px 8px; border-radius: 8px; font-size: 12px; font-weight: 500; color: white; background: ${statusConfig.color === 'bg-slate-500' ? '#64748b' : statusConfig.color === 'bg-blue-500' ? '#3b82f6' : statusConfig.color === 'bg-green-500' ? '#16a34a' : statusConfig.color === 'bg-orange-500' ? '#ea580c' : '#64748b'};">
+              ${statusConfig.icon} ${statusConfig.label}
+            </span>
+          </div>
+          
+          <div style="margin-bottom: 12px;">
+            <div style="font-weight: 600; color: #1e293b;">${r.customerName || ''}</div>
+            <div style="font-size: 14px; color: #64748b;">${r.phone || ''}</div>
+            ${r.address ? `<div style="font-size: 12px; color: #94a3b8; margin-top: 4px;">📍 ${r.address}</div>` : ''}
+          </div>
+
+          ${r.imageUrl ? `
+            <div style="margin-bottom: 12px;">
+              <img src="${r.imageUrl}" alt="รูปภาพ" style="max-width: 20rem; border-radius: 12px; border: 1px solid #e2e8f0;" onerror="this.style.display='none';">
+            </div>
+          ` : ''}
+
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 14px;">
+            <span style="background: #f1f5f9; padding: 4px 8px; border-radius: 8px; color: #475569;">${r.serviceType || ''}</span>
+            <span style="color: #cbd5e1;">•</span>
+            <span style="color: #64748b;">${r.channel || ''}</span>
+            ${r.priority && r.priority !== 'normal' ? `
+              <span style="color: #cbd5e1;">•</span>
+              <span style="padding: 4px 8px; border-radius: 8px; font-size: 12px; ${r.priority === 'urgent' ? 'background: #fef9c3; color: #a16207;' : 'background: #fee2e2; color: #b91c1c;'}">
+                ${r.priority === 'urgent' ? '🟡 เร่งด่วน' : '🔴 ฉุกเฉิน'}
+              </span>
+            ` : ''}
+          </div>
+
+          ${r.description ? `<p style="font-size: 14px; color: #64748b; margin-bottom: 12px; background: #f8fafc; border-radius: 12px; padding: 8px;">${r.description}</p>` : ''}
+
+          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            ${STATUS_TRANSITIONS[r.status || 'new'].map(nextStatus => {
+      const nextConfig = STATUS_CONFIG[nextStatus] || STATUS_CONFIG.new
+      const bgColor = nextConfig.color === 'bg-slate-500' ? '#64748b' : nextConfig.color === 'bg-blue-500' ? '#3b82f6' : nextConfig.color === 'bg-green-500' ? '#16a34a' : nextConfig.color === 'bg-orange-500' ? '#ea580c' : '#64748b'
+      return `
+                <button onclick="window.updateStatus('${r.id}', '${nextStatus}')" 
+                  style="padding: 8px 12px; border-radius: 10px; font-size: 12px; font-weight: 500; color: white; background: ${bgColor}; transition: all 0.2s;">
+                  ${nextConfig.icon} ${nextConfig.label}
+                </button>
+              `
+    }).join('')}
+            <button onclick="window.openModalById('${r.id}')" 
+              style="padding: 8px 12px; border-radius: 10px; font-size: 12px; font-weight: 500; background: #f1f5f9; color: #64748b;">
+              ✏️ แก้ไข
+            </button>
+            <button onclick="window.deleteRequest('${r.id}')" 
+              style="padding: 8px 12px; border-radius: 10px; font-size: 12px; font-weight: 500; background: #fef2f2; color: #dc2626;">
+              🗑️ ลบ
+            </button>
+          </div>
+
+          ${history.length > 1 ? `
+            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f5f9;">
+              <p style="font-size: 12px; color: #94a3b8; margin: 0 0 4px 0;">ประวัติ:</p>
+              <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                ${history.map(h => {
+      const hConfig = STATUS_CONFIG[h.status] || STATUS_CONFIG.new
+      return `
+                    <span style="font-size: 12px; background: #f8fafc; padding: 2px 8px; border-radius: 4px; color: #64748b;">
+                      ${hConfig.icon || ''} ${h.status === 'new' ? 'เริ่มต้น' : (hConfig.label || h.status)}
+                    </span>
+                  `
+    }).join('')}
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      `
+  }
+
+  // ==================== INITIALIZE ====================
+  async function initApp() {
+    try {
+      console.log('=== INIT APP STARTED ===');
+      console.log('Calling getUsers...');
+      state.users = await googleScriptRun('getUsers')
+      console.log('Users loaded:', state.users.length);
+      console.log('Calling render()...');
+      render()
+      console.log('=== INIT APP FINISHED ===');
+    } catch (e) {
+      console.error('Init error:', e)
+      document.getElementById('app').innerHTML = `
+          <div style="padding: 40px; text-align: center;">
+            <h2 style="color: red; margin: 0 0 20px 0;">❌ เกิดข้อผิดพลาดในการโหลด</h2>
+            <p style="margin: 0 0 20px 0; color: #64748b;">${e.message}</p>
+            <button onclick="location.reload()" style="padding: 10px 20px; background: #3b82f6; color: white; border: none; border-radius: 5px; cursor: pointer;">
+              🔄 รีเฟรชหน้า
+            </button>
+          </div>
+        `;
+      document.getElementById('loading-screen').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+    }
+  }
+
+  // Start initialization
+  console.log('=== PAGE LOADED ===');
+  console.log('Starting initialization...');
+  initApp();
+
+  // Add timeout check
+  setTimeout(function () {
+    console.log('=== TIMEOUT CHECK ===');
+    console.log('Users loaded:', state.users.length);
+    if (state.users.length === 0) {
+      console.error('Init timeout - users not loaded after 10 seconds');
+      const app = document.getElementById('app');
+      const loadingScreen = document.getElementById('loading-screen');
+
+      if (app && loadingScreen) {
+        loadingScreen.style.display = 'none';
+        app.style.display = 'block';
+        app.innerHTML = `
+            <div style="padding: 40px; text-align: center; max-width: 600px; margin: 0 auto;">
+              <div style="font-size: 48px; margin-bottom: 20px;">⏰</div>
+              <h2 style="color: #dc2626; margin: 0 0 20px 0;">โหลดนานเกินไป</h2>
+              <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 20px; margin: 20px 0; text-align: left;">
+                <p style="color: #1f2937; margin: 0 0 12px 0; font-weight: 600;">สาเหตุที่เป็นไปได้:</p>
+                <ul style="color: #4b5563; margin: 0; padding-left: 20px; line-height: 1.8;">
+                  <li>Google Apps Script มีปัญหาหรือ error</li>
+                  <li>Internet ช้าหรือไม่เชื่อมต่อ</li>
+                  <li>ฟังก์ชัน getUsers ล้มเหลว</li>
+                  <li>ยังไม่ได้รัน setup ใน Google Apps Script</li>
+                </ul>
+              </div>
+              <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 20px; margin: 20px 0; text-align: left;">
+                <p style="color: #1e40af; margin: 0 0 12px 0; font-weight: 600;">วิธีแก้:</p>
+                <ol style="color: #1e3a8a; margin: 0; padding-left: 20px; line-height: 1.8;">
+                  <li>เปิด Console (F12) เพื่อดู error</li>
+                  <li>ไปที่ Google Apps Script Editor</li>
+                  <li>เลือกฟังก์ชัน <strong>setup</strong> และกด Run</li>
+                  <li>รีเฟรชหน้าเว็บ</li>
+                  <li>ถ้ายังไม่ได้ Deploy ใหม่</li>
+                </ol>
+              </div>
+              <button onclick="location.reload()" style="padding: 12px 24px; background: #3b82f6; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600;">
+                🔄 รีเฟรชหน้า
+              </button>
+            </div>
+          `;
+      }
+    }
+  }, 10000);
+</script>

@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ระบบรับงานบริการแอร์</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; min-height: 100vh; }
+    
+    /* Login Screen */
+    .login-screen { min-height: 100vh; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .login-box { background: white; border-radius: 24px; padding: 32px 24px; width: 100%; max-width: 400px; box-shadow: 0 25px 50px rgba(0,0,0,0.25); }
+    .login-logo { text-align: center; margin-bottom: 32px; }
+    .login-logo .icon { width: 80px; height: 80px; background: #3b82f6; border-radius: 20px; display: flex; align-items: center; justify-content: center; font-size: 40px; margin: 0 auto 16px; }
+    .login-logo h1 { font-size: 22px; color: #1e293b; font-weight: 700; }
+    .login-logo p { color: #64748b; font-size: 14px; margin-top: 8px; }
+    .dept-section { background: #f8fafc; border-radius: 16px; padding: 16px; margin-bottom: 12px; }
+    .dept-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+    .dept-admin .dept-title { color: #2563eb; }
+    .dept-quote .dept-title { color: #16a34a; }
+    .dept-procure .dept-title { color: #ea580c; }
+    .user-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .user-grid.single { grid-template-columns: 1fr; }
+    .user-btn { background: white; border: 2px solid #e2e8f0; padding: 12px 16px; border-radius: 12px; font-size: 14px; cursor: pointer; transition: all 0.2s; text-align: center; }
+    .user-btn:hover { background: #f1f5f9; border-color: #cbd5e1; }
+    
+    /* Main App */
+    .app { display: none; }
+    .header { background: white; padding: 12px 16px; position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .header-content { display: flex; align-items: center; justify-content: space-between; max-width: 768px; margin: 0 auto; }
+    .header-left { display: flex; align-items: center; gap: 10px; }
+    .header-icon { width: 40px; height: 40px; background: #3b82f6; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+    .header-title { font-size: 16px; font-weight: 700; color: #1e293b; }
+    .header-subtitle { font-size: 11px; color: #64748b; }
+    .header-right { display: flex; gap: 8px; }
+    .btn-add { background: #3b82f6; color: white; padding: 8px 16px; border-radius: 10px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+    .btn-logout { background: #f1f5f9; color: #64748b; padding: 8px 12px; border-radius: 10px; border: none; font-size: 12px; cursor: pointer; }
+    
+    /* Main Content */
+    .main { max-width: 768px; margin: 0 auto; padding: 16px; }
+    
+    /* Stats */
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+    .stat-card { background: white; border-radius: 16px; padding: 16px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .stat-value { font-size: 28px; font-weight: 800; color: #1e293b; }
+    .stat-card.todo { background: #fefce8; }
+    .stat-card.todo .stat-value { color: #ca8a04; }
+    .stat-card.done { background: #f0fdf4; }
+    .stat-card.done .stat-value { color: #16a34a; }
+    .stat-label { font-size: 11px; color: #64748b; margin-top: 4px; }
+    
+    /* Search */
+    .search-box { background: white; border-radius: 16px; padding: 12px; margin-bottom: 16px; display: flex; gap: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .search-input { flex: 1; padding: 10px 12px 10px 36px; border: 2px solid #e2e8f0; border-radius: 10px; font-size: 14px; background: #f8fafc; }
+    .search-wrapper { position: relative; flex: 1; }
+    .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); }
+    .filter-select { padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 10px; font-size: 13px; background: #f8fafc; }
+    
+    /* Job Cards */
+    .job-list { display: flex; flex-direction: column; gap: 12px; }
+    .job-card { background: white; border-radius: 16px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .job-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .job-id { font-size: 11px; color: #3b82f6; font-weight: 600; font-family: monospace; }
+    .job-date { font-size: 11px; color: #94a3b8; }
+    .job-status { padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 600; color: white; }
+    .job-customer { font-size: 16px; font-weight: 600; color: #1e293b; }
+    .job-phone { font-size: 13px; color: #64748b; margin-top: 2px; }
+    .job-address { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+    .job-meta { display: flex; gap: 8px; margin-top: 10px; }
+    .job-tag { background: #f1f5f9; padding: 4px 8px; border-radius: 6px; font-size: 11px; color: #475569; }
+    .job-desc { background: #f8fafc; border-radius: 10px; padding: 10px; margin-top: 10px; font-size: 13px; color: #64748b; }
+    .job-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+    .action-btn { padding: 8px 12px; border-radius: 10px; font-size: 12px; font-weight: 500; border: none; cursor: pointer; color: white; }
+    .action-btn.secondary { background: #f1f5f9; color: #475569; }
+    .action-btn.danger { background: #fee2e2; color: #dc2626; }
+    .job-history { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f5f9; }
+    .history-label { font-size: 11px; color: #94a3b8; margin-bottom: 6px; }
+    .history-items { display: flex; flex-wrap: wrap; gap: 4px; }
+    .history-item { background: #f8fafc; padding: 3px 8px; border-radius: 6px; font-size: 10px; color: #64748b; }
+    
+    /* Empty State */
+    .empty-state { background: white; border-radius: 16px; padding: 48px 24px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .empty-icon { font-size: 48px; margin-bottom: 16px; }
+    .empty-text { color: #64748b; font-size: 14px; }
+    
+    /* Modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: flex-end; justify-content: center; z-index: 1000; }
+    .modal { background: white; width: 100%; max-width: 500px; max-height: 90vh; border-radius: 24px 24px 0 0; overflow: hidden; }
+    .modal-header { padding: 16px 20px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; }
+    .modal-title { font-size: 18px; font-weight: 700; color: #1e293b; }
+    .modal-close { background: #f1f5f9; border: none; width: 32px; height: 32px; border-radius: 8px; font-size: 16px; cursor: pointer; }
+    .modal-body { padding: 20px; overflow-y: auto; max-height: 60vh; }
+    .form-group { margin-bottom: 16px; }
+    .form-label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px; }
+    .form-input { width: 100%; padding: 10px 12px; border: 2px solid #e2e8f0; border-radius: 10px; font-size: 14px; }
+    .form-input:focus { outline: none; border-color: #3b82f6; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .channel-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+    .channel-btn { padding: 8px 12px; border-radius: 8px; font-size: 12px; border: none; cursor: pointer; background: #f1f5f9; color: #64748b; }
+    .channel-btn.active { background: #3b82f6; color: white; }
+    .priority-btns { display: flex; gap: 6px; }
+    .priority-btn { flex: 1; padding: 10px; border-radius: 10px; font-size: 12px; border: none; cursor: pointer; background: #f8fafc; }
+    .priority-btn.active { background: white; border: 2px solid #64748b; }
+    .modal-footer { padding: 16px 20px; border-top: 1px solid #f1f5f9; display: flex; gap: 10px; }
+    .btn-cancel { flex: 1; padding: 12px; border-radius: 10px; background: #f1f5f9; color: #64748b; border: none; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .btn-save { flex: 1; padding: 12px; border-radius: 10px; background: #3b82f6; color: white; border: none; font-size: 14px; font-weight: 600; cursor: pointer; }
+    
+    /* Status Colors */
+    .status-new { background: #64748b; }
+    .status-queue { background: #3b82f6; }
+    .status-scheduled { background: #6366f1; }
+    .status-quotation { background: #22c55e; }
+    .status-check_parts { background: #f97316; }
+    .status-waiting_send { background: #eab308; }
+    .status-sent { background: #10b981; }
+    .status-cancelled { background: #ef4444; }
+  </style>
+</head>
+<body>
+  <!-- Login Screen -->
+  <div class="login-screen" id="loginScreen">
+    <div class="login-box">
+      <div class="login-logo">
+        <div class="icon">❄️</div>
+        <h1>ระบบรับงานบริการแอร์</h1>
+        <p>เลือกผู้ใช้เพื่อเข้าสู่ระบบ</p>
+      </div>
+      
+      <div class="dept-section dept-admin">
+        <div class="dept-title">👤 ฝ่ายแอดมิน (6 คน)</div>
+        <div class="user-grid">
+          <button class="user-btn" onclick="login('admin1', 'คุณสมชาย', 'admin')">คุณสมชาย</button>
+          <button class="user-btn" onclick="login('admin2', 'คุณสมหญิง', 'admin')">คุณสมหญิง</button>
+          <button class="user-btn" onclick="login('admin3', 'คุณสมศักดิ์', 'admin')">คุณสมศักดิ์</button>
+          <button class="user-btn" onclick="login('admin4', 'คุณสมศรี', 'admin')">คุณสมศรี</button>
+          <button class="user-btn" onclick="login('admin5', 'คุณสมบูรณ์', 'admin')">คุณสมบูรณ์</button>
+          <button class="user-btn" onclick="login('admin6', 'คุณสมปอง', 'admin')">คุณสมปอง</button>
+        </div>
+      </div>
+      
+      <div class="dept-section dept-quote">
+        <div class="dept-title">📄 ฝ่ายทำใบเสนอราคา (1 คน)</div>
+        <div class="user-grid single">
+          <button class="user-btn" onclick="login('quote1', 'คุณใบเสนอ', 'quotation')">คุณใบเสนอ</button>
+        </div>
+      </div>
+      
+      <div class="dept-section dept-procure">
+        <div class="dept-title">🛒 ฝ่ายจัดซื้อ (1 คน)</div>
+        <div class="user-grid single">
+          <button class="user-btn" onclick="login('procure1', 'คุณจัดซื้อ', 'procurement')">คุณจัดซื้อ</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main App -->
+  <div class="app" id="mainApp">
+    <header class="header">
+      <div class="header-content">
+        <div class="header-left">
+          <div class="header-icon">❄️</div>
+          <div>
+            <div class="header-title">ระบบรับงานบริการแอร์</div>
+            <div class="header-subtitle" id="userInfo"></div>
+          </div>
+        </div>
+        <div class="header-right">
+          <button class="btn-add" id="addBtn" onclick="openModal()">
+            <span>+</span> เพิ่มงาน
+          </button>
+          <button class="btn-logout" onclick="logout()">ออกจากระบบ</button>
+        </div>
+      </div>
+    </header>
+    
+    <main class="main">
+      <!-- Stats -->
+      <div class="stats">
+        <div class="stat-card">
+          <div class="stat-value" id="statTotal">0</div>
+          <div class="stat-label">งานทั้งหมด</div>
+        </div>
+        <div class="stat-card todo">
+          <div class="stat-value" id="statTodo">0</div>
+          <div class="stat-label">รอดำเนินการ</div>
+        </div>
+        <div class="stat-card done">
+          <div class="stat-value" id="statDone">0</div>
+          <div class="stat-label">เสร็จสิ้น</div>
+        </div>
+      </div>
+      
+      <!-- Search -->
+      <div class="search-box">
+        <div class="search-wrapper">
+          <span class="search-icon">🔍</span>
+          <input type="text" class="search-input" placeholder="ค้นหาชื่อ, เบอร์โทร, เลขที่งาน..." id="searchInput" oninput="renderJobs()">
+        </div>
+        <select class="filter-select" id="statusFilter" onchange="renderJobs()">
+          <option value="all">ทุกสถานะ</option>
+        </select>
+      </div>
+      
+      <!-- Job List -->
+      <div class="job-list" id="jobList"></div>
+    </main>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title" id="modalTitle">➕ เพิ่มงานใหม่</div>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">ช่องทาง</label>
+          <div class="channel-btns" id="channelBtns"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">ชื่อลูกค้า *</label>
+            <input type="text" class="form-input" id="customerName" placeholder="ชื่อ-นามสกุล">
+          </div>
+          <div class="form-group">
+            <label class="form-label">เบอร์โทร *</label>
+            <input type="tel" class="form-input" id="customerPhone" placeholder="081-234-5678">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">ที่อยู่</label>
+          <input type="text" class="form-input" id="customerAddress" placeholder="ที่อยู่ปฏิบัติงาน">
+        </div>
+        <div class="form-group">
+          <label class="form-label">ประเภทงาน</label>
+          <select class="form-input" id="serviceType">
+            <option>ล้างแอร์</option>
+            <option>ซ่อม</option>
+            <option>ติดตั้ง</option>
+            <option>ตรวจสอบ</option>
+            <option>บำรุงรักษา</option>
+            <option>อื่นๆ</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">รายละเอียด</label>
+          <textarea class="form-input" id="description" rows="2" placeholder="รายละเอียดงาน"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">ความเร่งด่วน</label>
+          <div class="priority-btns" id="priorityBtns"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">สถานะ</label>
+          <select class="form-input" id="statusSelect"></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label"></label>
+          <input type="text" class="form-input" id="" placeholder="1,500">
+        </div>
+        <div class="form-group">
+          <label class="form-label">หมายเหตุ</label>
+          <input type="text" class="form-input" id="notes" placeholder="หมายเหตุเพิ่มเติม">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-cancel" onclick="closeModal()">ยกเลิก</button>
+        <button class="btn-save" onclick="saveJob()">บันทึก</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Status Configuration
+    const STATUS = {
+      new: { label: 'รับเรื่องใหม่', icon: '📥', color: 'status-new' },
+      queue: { label: 'ขอคิว', icon: '📋', color: 'status-queue' },
+      scheduled: { label: 'ลงปฏิทินแล้ว', icon: '📅', color: 'status-scheduled' },
+      quotation: { label: 'ขอใบเสนอราคา', icon: '💰', color: 'status-quotation' },
+      check_parts: { label: 'เช็คอะไหล่', icon: '🔧', color: 'status-check_parts' },
+      waiting_send: { label: 'รอส่งลูกค้า', icon: '📤', color: 'status-waiting_send' },
+      sent: { label: 'ส่งลูกค้าแล้ว', icon: '✅', color: 'status-sent' },
+      cancelled: { label: 'ยกเลิก', icon: '❌', color: 'status-cancelled' }
+    };
+
+    const TRANSITIONS = {
+      new: ['queue', 'quotation', 'check_parts', 'cancelled'],
+      queue: ['scheduled', 'cancelled'],
+      scheduled: ['sent', 'cancelled'],
+      quotation: ['waiting_send', 'check_parts', 'cancelled'],
+      check_parts: ['quotation', 'cancelled'],
+      waiting_send: ['sent', 'cancelled'],
+      sent: [],
+      cancelled: []
+    };
+
+    const DEPT_STATUS = {
+      admin: ['new', 'queue', 'scheduled', 'waiting_send'],
+      quotation: ['quotation'],
+      procurement: ['check_parts']
+    };
+
+    const CHANNELS = ['LINE', 'โทร', 'Walk-in', 'Facebook', 'อื่นๆ'];
+    const PRIORITIES = [
+      { key: 'normal', label: '⚪ ปกติ' },
+      { key: 'urgent', label: '🟡 เร่งด่วน' },
+      { key: 'emergency', label: '🔴 ฉุกเฉิน' }
+    ];
+
+    let currentUser = null;
+    let jobs = [];
+    let editingId = null;
+    let selectedChannel = 'LINE';
+    let selectedPriority = 'normal';
+
+    // Initialize
+    function init() {
+      loadUser();
+      loadJobs();
+      setupModal();
+    }
+
+    function loadUser() {
+      const saved = localStorage.getItem('aircon_user');
+      if (saved) {
+        currentUser = JSON.parse(saved);
+        showApp();
+      }
+    }
+
+    function loadJobs() {
+      const saved = localStorage.getItem('aircon_jobs');
+      if (saved) jobs = JSON.parse(saved);
+    }
+
+    function saveJobs() {
+      localStorage.setItem('aircon_jobs', JSON.stringify(jobs));
+    }
+
+    // Login/Logout
+    function login(id, name, dept) {
+      currentUser = { id, name, department: dept };
+      localStorage.setItem('aircon_user', JSON.stringify(currentUser));
+      showApp();
+    }
+
+    function logout() {
+      currentUser = null;
+      localStorage.removeItem('aircon_user');
+      document.getElementById('loginScreen').style.display = 'flex';
+      document.getElementById('mainApp').style.display = 'none';
+    }
+
+    function showApp() {
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('mainApp').style.display = 'block';
+      
+      const deptNames = { admin: 'ฝ่ายแอดมิน', quotation: 'ฝ่ายทำใบเสนอราคา', procurement: 'ฝ่ายจัดซื้อ' };
+      document.getElementById('userInfo').textContent = `${currentUser.name} • ${deptNames[currentUser.department]}`;
+      
+      // Show add button only for admin
+      document.getElementById('addBtn').style.display = currentUser.department === 'admin' ? 'flex' : 'none';
+      
+      setupStatusFilter();
+      renderJobs();
+    }
+
+    function setupStatusFilter() {
+      const select = document.getElementById('statusFilter');
+      select.innerHTML = '<option value="all">ทุกสถานะ</option>';
+      
+      const statuses = currentUser.department === 'admin' 
+        ? Object.keys(STATUS) 
+        : DEPT_STATUS[currentUser.department];
+      
+      statuses.forEach(key => {
+        const s = STATUS[key];
+        const opt = document.createElement('option');
+        opt.value = key;
+        opt.textContent = `${s.icon} ${s.label}`;
+        select.appendChild(opt);
+      });
+    }
+
+    // Render Jobs
+    function renderJobs() {
+      const search = document.getElementById('searchInput').value.toLowerCase();
+      const filter = document.getElementById('statusFilter').value;
+      
+      let filtered = jobs;
+      
+      // Filter by department
+      if (currentUser.department !== 'admin') {
+        filtered = filtered.filter(j => DEPT_STATUS[currentUser.department].includes(j.status));
+      }
+      
+      // Search
+      if (search) {
+        filtered = filtered.filter(j => 
+          j.customerName.toLowerCase().includes(search) ||
+          j.phone.includes(search) ||
+          j.requestNo.toLowerCase().includes(search)
+        );
+      }
+      
+      // Status filter
+      if (filter !== 'all') {
+        filtered = filtered.filter(j => j.status === filter);
+      }
+      
+      // Update stats
+      const todoStatuses = ['new', 'queue', 'quotation', 'check_parts', 'waiting_send'];
+      document.getElementById('statTotal').textContent = filtered.length;
+      document.getElementById('statTodo').textContent = filtered.filter(j => todoStatuses.includes(j.status)).length;
+      document.getElementById('statDone').textContent = filtered.filter(j => j.status === 'sent').length;
+      
+      // Render list
+      const container = document.getElementById('jobList');
+      
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">📭</div>
+            <div class="empty-text">ไม่มีงานที่ต้องดำเนินการ</div>
+          </div>
+        `;
+        return;
+      }
+      
+      container.innerHTML = filtered.map(job => {
+        const s = STATUS[job.status];
+        const transitions = TRANSITIONS[job.status];
+        
+        return `
+          <div class="job-card">
+            <div class="job-header">
+              <div>
+                <span class="job-id">${job.requestNo}</span>
+                <span class="job-date">${formatDate(job.createdAt)}</span>
+              </div>
+              <span class="job-status ${s.color}">${s.icon} ${s.label}</span>
+            </div>
+            <div class="job-customer">${job.customerName}</div>
+            <div class="job-phone">${job.phone}</div>
+            ${job.address ? `<div class="job-address">📍 ${job.address}</div>` : ''}
+            <div class="job-meta">
+              <span class="job-tag">${job.serviceType}</span>
+              <span class="job-tag">${job.channel}</span>
+            </div>
+            ${job.description ? `<div class="job-desc">${job.description}</div>` : ''}
+            <div class="job-actions">
+              ${transitions.map(t => {
+                const ts = STATUS[t];
+                return `<button class="action-btn ${ts.color}" onclick="updateStatus('${job.id}', '${t}')">${ts.icon} ${ts.label}</button>`;
+              }).join('')}
+              <button class="action-btn secondary" onclick="editJob('${job.id}')">✏️ แก้ไข</button>
+              <button class="action-btn danger" onclick="deleteJob('${job.id}')">🗑️ ลบ</button>
+            </div>
+            ${job.history && job.history.length > 1 ? `
+              <div class="job-history">
+                <div class="history-label">ประวัติ:</div>
+                <div class="history-items">
+                  ${job.history.map(h => `<span class="history-item">${STATUS[h.status].icon}</span>`).join('')}
+                </div>
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function formatDate(dateStr) {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // Modal
+    function setupModal() {
+      // Channel buttons
+      document.getElementById('channelBtns').innerHTML = CHANNELS.map(ch => 
+        `<button class="channel-btn ${ch === selectedChannel ? 'active' : ''}" onclick="selectChannel('${ch}')">${ch}</button>`
+      ).join('');
+      
+      // Priority buttons
+      document.getElementById('priorityBtns').innerHTML = PRIORITIES.map(p => 
+        `<button class="priority-btn ${p.key === selectedPriority ? 'active' : ''}" onclick="selectPriority('${p.key}')">${p.label}</button>`
+      ).join('');
+      
+      // Status select
+      document.getElementById('statusSelect').innerHTML = Object.entries(STATUS).map(([key, s]) => 
+        `<option value="${key}">${s.icon} ${s.label}</option>`
+      ).join('');
+    }
+
+    function selectChannel(ch) {
+      selectedChannel = ch;
+      document.querySelectorAll('.channel-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent === ch);
+      });
+    }
+
+    function selectPriority(p) {
+      selectedPriority = p;
+      document.querySelectorAll('.priority-btn').forEach((btn, i) => {
+        btn.classList.toggle('active', PRIORITIES[i].key === p);
+      });
+    }
+
+    function openModal(id = null) {
+      editingId = id;
+      
+      if (id) {
+        const job = jobs.find(j => j.id === id);
+        if (!job) return;
+        
+        document.getElementById('modalTitle').textContent = '✏️ แก้ไขงาน';
+        document.getElementById('customerName').value = job.customerName;
+        document.getElementById('customerPhone').value = job.phone;
+        document.getElementById('customerAddress').value = job.address || '';
+        document.getElementById('serviceType').value = job.serviceType;
+        document.getElementById('description').value = job.description || '';
+        document.getElementById('statusSelect').value = job.status;
+        document.getElementById('').value = job. || '';
+        document.getElementById('notes').value = job.notes || '';
+        selectChannel(job.channel);
+        selectPriority(job.priority);
+      } else {
+        document.getElementById('modalTitle').textContent = '➕ เพิ่มงานใหม่';
+        document.getElementById('customerName').value = '';
+        document.getElementById('customerPhone').value = '';
+        document.getElementById('customerAddress').value = '';
+        document.getElementById('serviceType').value = 'ล้างแอร์';
+        document.getElementById('description').value = '';
+        document.getElementById('statusSelect').value = 'new';
+        document.getElementById('').value = '';
+        document.getElementById('notes').value = '';
+        selectChannel('LINE');
+        selectPriority('normal');
+      }
+      
+      document.getElementById('modalOverlay').style.display = 'flex';
+    }
+
+    function closeModal() {
+      document.getElementById('modalOverlay').style.display = 'none';
+      editingId = null;
+    }
+
+    function saveJob() {
+      const name = document.getElementById('customerName').value.trim();
+      const phone = document.getElementById('customerPhone').value.trim();
+      
+      if (!name || !phone) {
+        alert('กรุณากรอกชื่อลูกค้าและเบอร์โทร');
+        return;
+      }
+      
+      const jobData = {
+        customerName: name,
+        phone: phone,
+        address: document.getElementById('customerAddress').value,
+        serviceType: document.getElementById('serviceType').value,
+        description: document.getElementById('description').value,
+        status: document.getElementById('statusSelect').value,
+        : document.getElementById('').value,
+        notes: document.getElementById('notes').value,
+        channel: selectedChannel,
+        priority: selectedPriority
+      };
+      
+      if (editingId) {
+        const idx = jobs.findIndex(j => j.id === editingId);
+        if (idx !== -1) {
+          const oldStatus = jobs[idx].status;
+          const newStatus = jobData.status;
+          
+          jobs[idx] = { ...jobs[idx], ...jobData };
+          
+          if (oldStatus !== newStatus) {
+            jobs[idx].history.push({ status: newStatus, date: new Date().toISOString() });
+          }
+        }
+      } else {
+        const now = new Date();
+        const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+        const count = jobs.filter(j => j.requestNo.includes(dateStr)).length + 1;
+        
+        jobs.unshift({
+          id: Date.now().toString(),
+          requestNo: `REQ-${dateStr}-${count.toString().padStart(3, '0')}`,
+          createdAt: now.toISOString(),
+          ...jobData,
+          history: [{ status: 'new', date: now.toISOString() }]
+        });
+      }
+      
+      saveJobs();
+      closeModal();
+      renderJobs();
+    }
+
+    function editJob(id) {
+      openModal(id);
+    }
+
+    function deleteJob(id) {
+      if (confirm('ยืนยันการลบรายการนี้?')) {
+        jobs = jobs.filter(j => j.id !== id);
+        saveJobs();
+        renderJobs();
+      }
+    }
+
+    function updateStatus(id, newStatus) {
+      const idx = jobs.findIndex(j => j.id === id);
+      if (idx !== -1) {
+        jobs[idx].status = newStatus;
+        jobs[idx].history.push({ status: newStatus, date: new Date().toISOString() });
+        saveJobs();
+        renderJobs();
+      }
+    }
+
+    // Start
+    init();
+  </script>
+</body>
+</html>
