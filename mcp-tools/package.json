@@ -1,0 +1,24 @@
+{
+  "name": "context-manager-mcp",
+  "version": "1.0.0",
+  "description": "MCP Tool สำหรับจัดการ context บวม - ลบ system reminders ซ้ำๆ และสรุป context",
+  "main": "context-manager-mcp.js",
+  "bin": {
+    "context-manager": "./context-manager.js"
+  },
+  "scripts": {
+    "start": "node context-manager-mcp.js",
+    "test": "node context-manager.js"
+  },
+  "keywords": [
+    "mcp",
+    "context",
+    "optimization",
+    "ai"
+  ],
+  "author": "Wichaya Sitthirit",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0"
+  }
+}

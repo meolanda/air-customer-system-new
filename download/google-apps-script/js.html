@@ -646,24 +646,21 @@
                 </select>
               </div>
 
-              <!-- Status -->
+              <!-- Status - Hidden for new requests, visible for editing -->
+              ${state.editingRequest ? `
               <div>
                 <label style="display: block; font-size: 14px; font-weight: 500; color: #374151; margin-bottom: 4px;">สถานะ</label>
                 <select id="status" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 14px; background: white;">
                   ${Object.entries(STATUS_CONFIG)
-        .filter(([val]) => {
-          // If adding new job, only allow specific initial statuses
-          if (!state.editingRequest) {
-            return ['new', 'queue', 'quotation', 'check_parts'].includes(val);
-          }
-          // If editing, allow all (or logic could be refined further)
-          return true;
-        })
         .map(([val, cfg]) => `
                     <option value="${val}" ${state.formData.status === val ? 'selected' : ''}>${cfg.icon} ${cfg.label}</option>
                   `).join('')}
                 </select>
               </div>
+              ` : `
+              <input type="hidden" id="status" value="new">
+              `}
+
 
               <!-- Description -->
                <div>

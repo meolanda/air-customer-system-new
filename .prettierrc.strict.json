@@ -1,0 +1,45 @@
+{
+  "semi": false,
+  "singleQuote": true,
+  "tabWidth": 2,
+  "trailingComma": "es5",
+  "printWidth": 100,
+  "arrowParens": "always",
+  "endOfLine": "lf",
+
+  // 🛡️ Strict Formatting Rules
+  "proseWrap": "preserve",
+  "htmlWhitespaceSensitivity": "css",
+  "insertPragma": false,
+  "jsxSingleQuote": false,
+  "jsxBracketSameLine": false,
+  "quoteProps": "as-needed",
+
+  // 🚫 ห้ามทำสิ่งเหล่านี้
+  "noTabs": true,
+  "useTabs": false,
+
+  // 📝 Override สำหรับไฟล์ต่างๆ
+  "overrides": [
+    {
+      "files": "*.json",
+      "options": {
+        "printWidth": 80,
+        "trailingComma": "none"
+      }
+    },
+    {
+      "files": "*.md",
+      "options": {
+        "proseWrap": "always",
+        "printWidth": 80
+      }
+    },
+    {
+      "files": ["*.tsx", "*.jsx"],
+      "options": {
+        "printWidth": 120
+      }
+    }
+  ]
+}
