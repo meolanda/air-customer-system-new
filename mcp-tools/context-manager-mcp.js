@@ -4,6 +4,8 @@
  * MCP Server สำหรับจัดการ context บวม
  */
 
+/* eslint-disable @typescript-eslint/no-require-imports */
+
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const {

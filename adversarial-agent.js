@@ -6,6 +6,8 @@
  * เหมือกับการมี Code Reviewer 2 คนที่เอาจริงกัน
  */
 
+/* eslint-disable @typescript-eslint/no-require-imports */
+
 const { readdirSync, readFileSync, writeFileSync, existsSync } = require('fs');
 const path = require('path');
 

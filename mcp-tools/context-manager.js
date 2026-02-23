@@ -4,6 +4,8 @@
  * แก้ปัญหา Context บวมด้วยการจัดการ context อย่างมีประสิทธิภาพ
  */
 
+/* eslint-disable @typescript-eslint/no-require-imports */
+
 const fs = require('fs');
 const path = require('path');
 
