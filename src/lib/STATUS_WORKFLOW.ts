@@ -8,6 +8,8 @@ export type StatusValue =
   | 'queue'                  // จองคิว/นัดหมาย
   | 'waiting_quote'          // ขอใบเสนอราคา
   | 'checking_parts'         // เช็คอะไหล่ + เสนอราคา
+  | 'send_quote'             // ส่งใบเสนอราคาแล้ว
+  | 'waiting_response'       // รอลูกค้าตอบกลับ
   | 'waiting_send'           // รอส่งลูกค้า
   | 'sent'                   // ส่งลูกค้าแล้ว
   | 'completed'             // เสร็จสิ้น
@@ -45,7 +47,7 @@ export const STATUS_CONFIG: Record<StatusValue, StatusConfig> = {
     icon: '📥',
     color: 'bg-blue-100 text-blue-800',
     description: 'งานใหม่เข้ามาแล้ว',
-    nextStatuses: ['queue', 'waiting_quote', 'cancelled'],
+    nextStatuses: ['queue', 'waiting_quote', 'checking_parts', 'cancelled'],
     previousStatuses: [],
     nextButtonLabel: 'เลือกเส้นทาง',
     workflowPath: 'both',
@@ -74,7 +76,7 @@ export const STATUS_CONFIG: Record<StatusValue, StatusConfig> = {
     color: 'bg-purple-100 text-purple-800',
     description: 'เสร็จแล้ว รอส่งมอบให้ลูกค้า',
     nextStatuses: ['sent', 'completed', 'cancelled'],
-    previousStatuses: ['queue', 'checking_parts'],
+    previousStatuses: ['queue', 'checking_parts', 'waiting_response'],
     nextButtonLabel: 'ส่งลูกค้าแล้ว',
     workflowPath: 'both',
   },
@@ -123,10 +125,34 @@ export const STATUS_CONFIG: Record<StatusValue, StatusConfig> = {
     icon: '🔧',
     color: 'bg-indigo-100 text-indigo-800',
     description: 'ตรวจสอบอะไหล่และคำนวณราคา',
-    nextStatuses: ['waiting_send', 'queue', 'cancelled'],
-    previousStatuses: ['waiting_quote'],
+    nextStatuses: ['send_quote', 'waiting_send', 'queue', 'cancelled'],
+    previousStatuses: ['new', 'waiting_quote', 'waiting_response'],
     requiredFields: ['quoteAmount'],
-    nextButtonLabel: 'เสนอราคาแล้ว → ส่งลูกค้า',
+    nextButtonLabel: 'ส่งใบเสนอราคาแล้ว',
+    workflowPath: 'quote',
+  },
+
+  send_quote: {
+    value: 'send_quote',
+    label: 'ส่งใบเสนอราคาแล้ว',
+    icon: '📨',
+    color: 'bg-teal-100 text-teal-800',
+    description: 'ฝ่ายแอดมินส่งใบเสนอราคาให้ลูกค้าแล้ว',
+    nextStatuses: ['waiting_response', 'cancelled'],
+    previousStatuses: ['checking_parts'],
+    nextButtonLabel: 'รอลูกค้าตอบกลับ',
+    workflowPath: 'quote',
+  },
+
+  waiting_response: {
+    value: 'waiting_response',
+    label: 'รอลูกค้าตอบกลับ',
+    icon: '⏳',
+    color: 'bg-amber-100 text-amber-800',
+    description: 'รอลูกค้าตอบรับใบเสนอราคา',
+    nextStatuses: ['waiting_send', 'checking_parts', 'queue', 'cancelled'],
+    previousStatuses: ['send_quote'],
+    nextButtonLabel: 'ลูกค้าตอบตกลง → ส่งลูกค้า',
     workflowPath: 'quote',
   },
 
@@ -206,10 +232,12 @@ export function getStatusProgress(status: StatusValue): number {
   const progressMap: Record<StatusValue, number> = {
     new: 10,
     queue: 30,
-    waiting_quote: 25,
-    checking_parts: 40,
-    waiting_send: 60,
-    sent: 80,
+    waiting_quote: 20,
+    checking_parts: 35,
+    send_quote: 45,
+    waiting_response: 55,
+    waiting_send: 70,
+    sent: 85,
     completed: 100,
     cancelled: 0,
   };
