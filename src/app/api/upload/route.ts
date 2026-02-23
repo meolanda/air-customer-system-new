@@ -5,8 +5,8 @@ import { NextRequest, NextResponse } from 'next/server'
 async function getGoogleDriveClient() {
   const auth = new google.auth.GoogleAuth({
     credentials: {
-      client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      client_email: process.env['GOOGLE_SERVICE_ACCOUNT_EMAIL'],
+      private_key: process.env['GOOGLE_PRIVATE_KEY']?.replace(/\\n/g, '\n'),
     },
     scopes: ['https://www.googleapis.com/auth/drive.file'],
   })
@@ -18,7 +18,7 @@ async function getGoogleDriveClient() {
 export async function POST(request: NextRequest) {
   try {
     const drive = await getGoogleDriveClient()
-    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID
+    const folderId = process.env['GOOGLE_DRIVE_FOLDER_ID']
 
     if (!folderId) {
       return NextResponse.json(

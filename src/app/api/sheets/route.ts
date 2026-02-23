@@ -24,8 +24,8 @@ interface ServiceRequest {
 async function getGoogleSheetsClient() {
   const auth = new google.auth.GoogleAuth({
     credentials: {
-      client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      client_email: process.env['GOOGLE_SERVICE_ACCOUNT_EMAIL'],
+      private_key: process.env['GOOGLE_PRIVATE_KEY']?.replace(/\\n/g, '\n'),
     },
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   })
@@ -42,28 +42,28 @@ function arrayToRequest(row: string[], headers: string[]): ServiceRequest {
 
   let history: { status: string; date: string; by: string }[] = []
   try {
-    if (obj.history) {
-      history = JSON.parse(obj.history)
+    if (obj['history']) {
+      history = JSON.parse(obj['history'])
     }
   } catch (e) {
     history = []
   }
 
   return {
-    id: obj.id || '',
-    requestNo: obj.requestNo || '',
-    createdAt: obj.createdAt || '',
-    channel: obj.channel as ServiceRequest['channel'] || 'LINE',
-    customerName: obj.customerName || '',
-    phone: obj.phone || '',
-    address: obj.address || '',
-    serviceType: obj.serviceType || '',
-    description: obj.description || '',
-    priority: obj.priority as ServiceRequest['priority'] || 'normal',
-    status: obj.status || 'new',
-    appointmentDate: obj.appointmentDate || '',
-    notes: obj.notes || '',
-    imageUrl: obj.imageUrl || '',
+    id: obj['id'] || '',
+    requestNo: obj['requestNo'] || '',
+    createdAt: obj['createdAt'] || '',
+    channel: obj['channel'] as ServiceRequest['channel'] || 'LINE',
+    customerName: obj['customerName'] || '',
+    phone: obj['phone'] || '',
+    address: obj['address'] || '',
+    serviceType: obj['serviceType'] || '',
+    description: obj['description'] || '',
+    priority: obj['priority'] as ServiceRequest['priority'] || 'normal',
+    status: obj['status'] || 'new',
+    appointmentDate: obj['appointmentDate'] || '',
+    notes: obj['notes'] || '',
+    imageUrl: obj['imageUrl'] || '',
     history,
   }
 }
@@ -93,7 +93,7 @@ function requestToArray(request: ServiceRequest): string[] {
 export async function GET() {
   try {
     const sheets = await getGoogleSheetsClient()
-    const spreadsheetId = process.env.GOOGLE_SHEETS_ID
+    const spreadsheetId = process.env['GOOGLE_SHEETS_ID']
 
     if (!spreadsheetId) {
       return NextResponse.json(
@@ -137,7 +137,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const sheets = await getGoogleSheetsClient()
-    const spreadsheetId = process.env.GOOGLE_SHEETS_ID
+    const spreadsheetId = process.env['GOOGLE_SHEETS_ID']
 
     if (!spreadsheetId) {
       return NextResponse.json(
@@ -192,7 +192,7 @@ export async function PUT(request: NextRequest) {
     const body = await request.json()
     const { id, ...updateData } = body
     const sheets = await getGoogleSheetsClient()
-    const spreadsheetId = process.env.GOOGLE_SHEETS_ID
+    const spreadsheetId = process.env['GOOGLE_SHEETS_ID']
 
     if (!spreadsheetId) {
       return NextResponse.json(
@@ -211,7 +211,8 @@ export async function PUT(request: NextRequest) {
     let rowIndex = -1
 
     for (let i = 0; i < rows.length; i++) {
-      if (rows[i][0] === id) {
+      const row = rows[i]
+      if (row && row[0] === id) {
         rowIndex = i + 1 // 1-indexed for Google Sheets
         break
       }
@@ -274,7 +275,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     const sheets = await getGoogleSheetsClient()
-    const spreadsheetId = process.env.GOOGLE_SHEETS_ID
+    const spreadsheetId = process.env['GOOGLE_SHEETS_ID']
 
     if (!spreadsheetId) {
       return NextResponse.json(
@@ -293,7 +294,8 @@ export async function DELETE(request: NextRequest) {
     let rowIndex = -1
 
     for (let i = 0; i < rows.length; i++) {
-      if (rows[i][0] === id) {
+      const row = rows[i]
+      if (row && row[0] === id) {
         rowIndex = i + 1 // 1-indexed for Google Sheets
         break
       }

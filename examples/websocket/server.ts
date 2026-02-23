@@ -1,5 +1,6 @@
 import { createServer } from 'http'
-import { Server } from 'socket.io'
+// @ts-ignore - socket.io may not be installed
+import { Server, Socket } from 'socket.io'
 
 const httpServer = createServer()
 const io = new Server(httpServer, {
@@ -46,14 +47,14 @@ const createUserMessage = (username: string, content: string): Message => ({
   type: 'user'
 })
 
-io.on('connection', (socket) => {
+io.on('connection', (socket: Socket) => {
   console.log(`User connected: ${socket.id}`)
 
   // Add test event handler
-  socket.on('test', (data) => {
+  socket.on('test', (data: unknown) => {
     console.log('Received test message:', data)
-    socket.emit('test-response', { 
-      message: 'Server received test message', 
+    socket.emit('test-response', {
+      message: 'Server received test message',
       data: data,
       timestamp: new Date().toISOString()
     })
@@ -110,7 +111,7 @@ io.on('connection', (socket) => {
     }
   })
 
-  socket.on('error', (error) => {
+  socket.on('error', (error: Error) => {
     console.error(`Socket error (${socket.id}):`, error)
   })
 })
