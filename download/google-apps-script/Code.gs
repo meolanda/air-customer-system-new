@@ -52,7 +52,6 @@ function getRequests() {
 
   const data = sheet.getDataRange().getValues();
   if (data.length <= 1) {
-    logErrorToSheet('No data found, returning empty array');
     return [];
   }
 
@@ -72,9 +71,6 @@ function getRequests() {
     }
   }
 
-  logErrorToSheet('SUCCESS: Returning ' + requests.length + ' requests');
-  logErrorToSheet('DEBUG: requests = ' + JSON.stringify(requests));
-
   // Force serialization to avoid Google Apps Script serialization issues
   return JSON.parse(JSON.stringify(requests));
 }
@@ -92,6 +88,12 @@ function logErrorToSheet(message) {
       debugSheet.setColumnWidth(2, 500);
     }
 
+    // Rotate: ถ้า > 500 data rows → ลบเก่าออก เหลือแค่ 200 rows ล่าสุด
+    const lastRow = debugSheet.getLastRow();
+    if (lastRow > 501) {
+      debugSheet.deleteRows(2, lastRow - 201);
+    }
+
     const timestamp = new Date().toISOString() + ' (' + new Date().toLocaleString('th-TH') + ')';
     debugSheet.appendRow([timestamp, message]);
   } catch (e) {
@@ -101,39 +103,45 @@ function logErrorToSheet(message) {
 
 // Add new request
 function addRequest(request) {
-  const sheet = getOrCreateSheet()
-  const headers = getHeaders()
-  
-  // Generate ID and Request No
-  request.id = Date.now().toString()
-  request.requestNo = generateRequestNo()
-  request.createdAt = new Date().toISOString()
-  // Create history
-  const history = [{
-    status: 'new',
-    date: new Date().toISOString(),
-    by: request.by || 'System'
-  }];
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = getOrCreateSheet()
+    const headers = getHeaders()
 
-  // If initial status is not new, add it to history as a second step
-  if (request.status && request.status !== 'new') {
-    history.push({
-      status: request.status,
-      date: new Date(Date.now() + 1000).toISOString(), // Add 1s to ensure order
+    // Generate ID and Request No
+    request.id = Date.now().toString()
+    request.requestNo = generateRequestNo()
+    request.createdAt = new Date().toISOString()
+    // Create history
+    const history = [{
+      status: 'new',
+      date: new Date().toISOString(),
       by: request.by || 'System'
-    });
+    }];
+
+    // If initial status is not new, add it to history as a second step
+    if (request.status && request.status !== 'new') {
+      history.push({
+        status: request.status,
+        date: new Date(Date.now() + 1000).toISOString(), // Add 1s to ensure order
+        by: request.by || 'System'
+      });
+    }
+
+    request.history = JSON.stringify(history)
+
+    // Add row
+    const row = objectToRow(request, headers)
+    sheet.appendRow(row)
+
+    // Clear cache
+    CacheService.getScriptCache().remove('requests');
+
+    return { success: true, data: request }
+  } finally {
+    lock.releaseLock();
   }
-
-  request.history = JSON.stringify(history)
-  
-  // Add row
-  const row = objectToRow(request, headers)
-  sheet.appendRow(row)
-  
-  // Clear cache
-  CacheService.getScriptCache().remove('requests');
-
-  return { success: true, data: request }
 }
 
 // Update request
@@ -363,6 +371,80 @@ function getOrCreateDriveFolder() {
   return DriveApp.createFolder(CONFIG.DRIVE_FOLDER_NAME)
 }
 
+// ==================== AI ANALYSIS ====================
+
+// Analyze image/screenshot with Gemini Vision
+function analyzeImageWithAI(base64Data) {
+  try {
+    const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+    if (!apiKey) return { success: false, error: 'ไม่พบ GEMINI_API_KEY ใน Script Properties' };
+
+    const mimeType = base64Data.split(';')[0].split(':')[1];
+    const base64 = base64Data.split(',')[1];
+
+    const prompt = `วิเคราะห์รูปภาพนี้ซึ่งเป็นข้อความหรือภาพหน้าจอจากลูกค้าที่ต้องการบริการแอร์คอนดิชั่น
+แยกข้อมูลและตอบเป็น JSON เท่านั้น (ไม่มีคำอธิบายเพิ่ม):
+{"customerName":"ชื่อลูกค้า","phone":"เบอร์โทร 10 หลักตัวเลขล้วน","address":"ที่อยู่หรือสถานที่","serviceType":"ล้างแอร์หรือซ่อมหรือติดตั้งหรือตรวจสอบหรืออื่นๆ","priority":"normal หรือ urgent หรือ emergency","description":"สรุปรายละเอียดงานทั้งหมด"}`;
+
+    const payload = {
+      contents: [{ parts: [
+        { text: prompt },
+        { inline_data: { mime_type: mimeType, data: base64 } }
+      ]}],
+      generationConfig: { response_mime_type: 'application/json' }
+    };
+
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + apiKey;
+    const response = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+
+    const json = JSON.parse(response.getContentText());
+    if (json.error) return { success: false, error: json.error.message };
+
+    const text = json.candidates[0].content.parts[0].text;
+    const data = JSON.parse(text);
+    return { success: true, data: data };
+  } catch (e) {
+    return { success: false, error: e.toString() };
+  }
+}
+
+// Analyze text (voice transcript) with Gemini
+function analyzeTextWithAI(text) {
+  try {
+    const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+    if (!apiKey) return { success: false, error: 'ไม่พบ GEMINI_API_KEY ใน Script Properties' };
+
+    const prompt = 'ข้อความต่อไปนี้มาจากลูกค้าที่ต้องการบริการแอร์คอนดิชั่น:\n"' + text + '"\n\nแยกข้อมูลและตอบเป็น JSON เท่านั้น (ไม่มีคำอธิบายเพิ่ม):\n{"customerName":"ชื่อลูกค้า","phone":"เบอร์โทร 10 หลักตัวเลขล้วน","address":"ที่อยู่หรือสถานที่","serviceType":"ล้างแอร์หรือซ่อมหรือติดตั้งหรือตรวจสอบหรืออื่นๆ","priority":"normal หรือ urgent หรือ emergency","description":"สรุปรายละเอียดงานทั้งหมด"}';
+
+    const payload = {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { response_mime_type: 'application/json' }
+    };
+
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + apiKey;
+    const response = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+
+    const json = JSON.parse(response.getContentText());
+    if (json.error) return { success: false, error: json.error.message };
+
+    const resultText = json.candidates[0].content.parts[0].text;
+    const data = JSON.parse(resultText);
+    return { success: true, data: data };
+  } catch (e) {
+    return { success: false, error: e.toString() };
+  }
+}
+
 // ==================== SETUP FUNCTION ====================
 
 // Run this once to setup
@@ -371,4 +453,61 @@ function setup() {
   getOrCreateDriveFolder()
   setupUsers()
   Logger.log('Setup complete!')
+}
+
+// ==================== DIAGNOSTICS ====================
+
+// รันฟังก์ชันนี้ใน Apps Script Editor เพื่อตรวจสอบปัญหา
+// (เลือก runDiagnostics ในช่อง dropdown แล้วกด Run ▶)
+function runDiagnostics() {
+  const r = {};
+
+  // 1. Spreadsheet
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    r.spreadsheet = '✅ OK: ' + ss.getName();
+  } catch (e) { r.spreadsheet = '❌ ' + e.message; }
+
+  // 2. Sheets
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    r.sheets = ss.getSheets().map(s => s.getName());
+  } catch (e) { r.sheets = '❌ ' + e.message; }
+
+  // 3. Script Properties (API Key)
+  try {
+    const key = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+    r.geminiApiKey = key ? '✅ SET (length=' + key.length + ')' : '❌ NOT SET - ต้องไปตั้งใน Project Settings > Script Properties';
+  } catch (e) { r.geminiApiKey = '❌ ' + e.message; }
+
+  // 4. UrlFetchApp (Gemini endpoint)
+  try {
+    const res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/', { muteHttpExceptions: true });
+    r.urlFetch = '✅ OK (HTTP ' + res.getResponseCode() + ')';
+  } catch (e) { r.urlFetch = '❌ ' + e.message; }
+
+  // 5. Drive
+  try {
+    DriveApp.getRootFolder();
+    r.drive = '✅ OK';
+  } catch (e) { r.drive = '❌ ' + e.message; }
+
+  // 6. Users sheet
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sh = ss.getSheetByName('Users');
+    if (sh) {
+      r.users = '✅ Found: ' + (sh.getLastRow() - 1) + ' users';
+    } else {
+      r.users = '⚠️ Users sheet ไม่มี - กรุณา run setup() ก่อน';
+    }
+  } catch (e) { r.users = '❌ ' + e.message; }
+
+  // Print results
+  Logger.log('========== DIAGNOSTICS ==========');
+  for (const k in r) {
+    Logger.log(k + ': ' + (Array.isArray(r[k]) ? r[k].join(', ') : r[k]));
+  }
+  Logger.log('=================================');
+  return r;
 }

@@ -1,0 +1,521 @@
+{
+  "project": {
+    "name": "ระบบรับงานบริการแอร์ (Aircon Service Management System)",
+    "version": "1.0.0",
+    "lastUpdated": "2026-02-20",
+    "status": "planning",
+    "methodology": "feature-driven-development"
+  },
+
+  "rules": {
+    "strict_mode": true,
+    "must_complete_before_next": true,
+    "testing_required": true,
+    "no_file_deletion": true,
+    "declaration_before_completion": false
+  },
+
+  "phases": [
+    {
+      "id": "phase-0",
+      "name": "วางแผนและเตรียมการ",
+      "status": "completed",
+      "features": [
+        {
+          "id": "feature-0-1",
+          "name": "สร้าง PRD (Product Requirements Document)",
+          "status": "completed",
+          "files": ["PRD.md"],
+          "description": "สร้างเอกสาร PRD ที่ครอบคลุมทุกแง่มุมของโปรเจค",
+          "acceptance_criteria": [
+            "✅ มีวัตถุประสงค์ชัดเจน",
+            "✅ มีรายชื่อผู้ใช้ (8 คน, 3 ฝ่าย)",
+            "✅ มี Workflow ทั้ง 3 เส้นทางพร้อม Diagram",
+            "✅ มีสถานะงาน 8 สถานะ",
+            "✅ มีฟีเจอร์ครบถ้วน",
+            "✅ มี KPI และ Metrics",
+            "✅ มี Timeline",
+            "✅ มีคู่มือการใช้งาน"
+          ],
+          "test_status": "passed",
+          "test_notes": "ผ่านการตรวจสอบโดยผู้ใช้"
+        },
+        {
+          "id": "feature-0-2",
+          "name": "สร้าง Architecture Document",
+          "status": "completed",
+          "files": ["architecture.md"],
+          "description": "สร้างเอกสารสถาปัตยกรรมระบบที่ครอบคลุม",
+          "acceptance_criteria": [
+            "✅ มี System Architecture (4 Layers)",
+            "✅ มี File Structure",
+            "✅ มี Data Flow",
+            "✅ มี Security Architecture",
+            "✅ มี Performance Strategy",
+            "✅ มี Error Handling",
+            "✅ มี Deployment Process",
+            "✅ มี Backup Strategy"
+          ],
+          "test_status": "passed",
+          "test_notes": "ผ่านการตรวจสอบโดยผู้ใช้"
+        },
+        {
+          "id": "feature-0-3",
+          "name": "สร้าง features.json",
+          "status": "completed",
+          "files": ["features.json"],
+          "description": "สร้างไฟล์จัดการฟีเจอร์แบบมีโครงสร้าง",
+          "acceptance_criteria": [
+            "✅ ใช้ JSON Format",
+            "✅ มีการแบ่ง Phase",
+            "✅ มี Acceptance Criteria",
+            "✅ มี Test Status",
+            "✅ มี Dependencies"
+          ],
+          "test_status": "passed",
+          "test_notes": "สร้างเสร็จแล้ว"
+        }
+      ]
+    },
+
+    {
+      "id": "phase-1",
+      "name": "ตั้งค่าระบบพื้นฐาน (Setup)",
+      "status": "completed",
+      "description": "ตั้งค่า Google Sheets และ Google Apps Script",
+      "features": [
+        {
+          "id": "feature-1-1",
+          "name": "สร้าง Google Sheets",
+          "status": "completed",
+          "priority": "critical",
+          "files": [],
+          "spreadsheet_id": "1_76ypstNWKYZ7iV7CfwMsNGnP7dzdKaTyce2QlpaefI",
+          "spreadsheet_url": "https://docs.google.com/spreadsheets/d/1_76ypstNWKYZ7iV7CfwMsNGnP7dzdKaTyce2QlpaefI/edit?gid=0#gid=0",
+          "description": "สร้าง Google Sheets สำหรับเก็บข้อมูลงาน",
+          "acceptance_criteria": [
+            "✅ สร้าง Spreadsheet ใหม่ชื่อ 'ระบบรับงานบริการแอร์'",
+            "✅ ไม่ต้องสร้าง Sheet ด้วยตัวเอง (ระบบสร้างให้)",
+            "✅ คัดลอก Spreadsheet ID: 1_76ypstNWKYZ7iV7CfwMsNGnP7dzdKaTyce2QlpaefI",
+            "✅ ใช้ clasp push สำเร็จ"
+          ],
+          "test_status": "passed",
+          "test_notes": "สร้าง Spreadsheet แล้วใช้ npx clasp push สำเร็จ",
+          "estimated_time": "5 นาที",
+          "completed_at": "2026-02-20",
+          "instructions": [
+            "1. เปิด https://sheets.google.com/",
+            "2. กด '+ Blank spreadsheet'",
+            "3. ตั้งชื่อ: 'ระบบรับงานบริการแอร์'",
+            "4. คัดลอก URL เพื่อเอา Spreadsheet ID",
+            "5. กด Share → ใส่อีเมลทีม → Editor → Send"
+          ]
+        },
+        {
+          "id": "feature-1-2",
+          "name": "เปิด Apps Script Editor",
+          "status": "completed",
+          "priority": "critical",
+          "files": [],
+          "depends_on": ["feature-1-1"],
+          "description": "เปิด Apps Script Editor จาก Google Sheets",
+          "acceptance_criteria": [
+            "✅ เปิด Apps Script Editor ได้",
+            "✅ เห็นหน้าต่าง Code.gs",
+            "✅ ใช้ npx clasp push ได้"
+          ],
+          "test_status": "passed",
+          "test_notes": "ใช้ clasp push สำเร็จ",
+          "estimated_time": "2 นาที",
+          "completed_at": "2026-02-20",
+          "instructions": [
+            "1. ใน Google Sheets ไปที่เมนู Extensions > Apps Script",
+            "2. รอจนกดเปิดหน้าต่างใหม่"
+          ]
+        },
+        {
+          "id": "feature-1-3",
+          "name": "สร้างไฟล์ Code.gs",
+          "status": "completed",
+          "priority": "critical",
+          "files": ["download/google-apps-script/Code.gs"],
+          "depends_on": ["feature-1-2"],
+          "description": "คัดลอกโค้ด Code.gs ไปใส่ใน Apps Script Editor ด้วย clasp",
+          "acceptance_criteria": [
+            "✅ มีไฟล์ Code.gs ในเครื่อง",
+            "✅ Push ขึ้น Google Apps Script ด้วย clasp",
+            "✅ ไม่มี Error ขึ้น"
+          ],
+          "test_status": "passed",
+          "test_notes": "ใช้ npx clasp push สำเร็จ",
+          "estimated_time": "3 นาที",
+          "completed_at": "2026-02-20",
+          "instructions": [
+            "1. เปิดไฟล์ download/google-apps-script/Code.gs ในเครื่อง",
+            "2. Copy โค้ดทั้งหมด",
+            "3. กลับไปที่ Apps Script Editor",
+            "4. ลบโค้ดเดิมใน Code.gs",
+            "5. Paste โค้ดใหม่",
+            "6. กด Save icon (หรือ Ctrl+S)"
+          ]
+        },
+        {
+          "id": "feature-1-4",
+          "name": "สร้างไฟล์ index.html",
+          "status": "completed",
+          "priority": "critical",
+          "files": ["download/google-apps-script/index.html"],
+          "depends_on": ["feature-1-3"],
+          "description": "สร้างไฟล์ HTML สำหรับ Frontend ด้วย clasp",
+          "acceptance_criteria": [
+            "✅ มีไฟล์ index.html ในเครื่อง",
+            "✅ Push ขึ้น Google Apps Script ด้วย clasp",
+            "✅ ไม่มี Error ขึ้น"
+          ],
+          "test_status": "passed",
+          "test_notes": "ใช้ npx clasp push สำเร็จ",
+          "estimated_time": "3 นาที",
+          "completed_at": "2026-02-20",
+          "instructions": [
+            "1. ใน Apps Script Editor กด '+' ถัดจาก Files",
+            "2. เลือก HTML",
+            "3. ตั้งชื่อ: index (ไม่ใช่ index.html)",
+            "4. คัดลอกโค้ดจาก download/google-apps-script/index.html",
+            "5. Paste โค้ด",
+            "6. กด Save"
+          ]
+        },
+        {
+          "id": "feature-1-5",
+          "name": "รัน Setup ครั้งแรก",
+          "status": "completed",
+          "priority": "critical",
+          "files": [],
+          "depends_on": ["feature-1-4"],
+          "description": "รันฟังก์ชัน setup เพื่อสร้าง Sheet และ Folder",
+          "acceptance_criteria": [
+            "✅ เลือกฟังก์ชัน 'setup' จาก dropdown",
+            "✅ กด Run",
+            "✅ กด Review Permissions",
+            "✅ กด Allow",
+            "✅ ระบบแสดง 'Setup complete!' ใน Log"
+          ],
+          "test_status": "passed",
+          "test_notes": "รัน setup สำเร็จ และได้ Script ID",
+          "estimated_time": "5 นาที",
+          "completed_at": "2026-02-20",
+          "instructions": [
+            "1. ใน Apps Script Editor เลือกฟังก์ชัน 'setup'",
+            "2. กด Run (ปุ่มเล่น)",
+            "3. ระบบจะขอ Permission → กด Review Permissions",
+            "4. เลือกบัญชี Google ของคุณ",
+            "5. กด Allow",
+            "6. ดูใน Execution Log ว่าขึ้น 'Setup complete!'"
+          ]
+        },
+        {
+          "id": "feature-1-6",
+          "name": "Deploy เป็น Web App",
+          "status": "completed",
+          "priority": "critical",
+          "files": [],
+          "depends_on": ["feature-1-5"],
+          "script_id": "1craABvtLZS8O67dLJXrAP50oZoPLUssiTyI60Kh5k_mHTf7K3iY29Liy",
+          "web_app_url": "https://script.google.com/macros/s/AKfycbylqOQ7xwzOcdh5utn3oVWZn0AFpKXATf3sOXQSNfmR8P7bRWB6VvduhYV9w-mmQFSclg/exec",
+          "description": "Deploy Apps Script เป็น Web App เพื่อใช้งานได้จริง",
+          "acceptance_criteria": [
+            "✅ กด Deploy > New deployment",
+            "✅ เลือก Web app",
+            "✅ ตั้งค่า: Description='ระบบรับงาน', Execute as='Me', Who has access='Anyone'",
+            "✅ กด Deploy",
+            "✅ ได้ URL: https://script.google.com/macros/s/AKfycbylqOQ7xwzOcdh5utn3oVWZn0AFpKXATf3sOXQSNfmR8P7bRWB6VvduhYV9w-mmQFSclg/exec"
+          ],
+          "test_status": "passed",
+          "test_notes": "Deploy สำเร็จและได้ Web App URL",
+          "estimated_time": "5 นาที",
+          "completed_at": "2026-02-20",
+          "instructions": [
+            "1. กดปุ่ม Deploy > New deployment",
+            "2. กดไอคอน ⚙️ (Settings) เลือก Web app",
+            "3. กรอก Description: 'ระบบรับงานบริการแอร์'",
+            "4. Execute as: เลือก 'Me (อีเมลของคุณ)'",
+            "5. Who has access: เลือก 'Anyone'",
+            "6. กด Deploy",
+            "7. คัดลอก URL ที่ได้ (เริ่มต้นด้วย https://script.google.com/...)"
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "phase-2",
+      "name": "ทดสอบระบบ (Testing)",
+      "status": "in_progress",
+      "description": "ทดสอบระบบให้แน่ใจว่าทำงานได้จริง",
+      "depends_on": ["phase-1"],
+      "web_app_url": "https://script.google.com/macros/s/AKfycbylqOQ7xwzOcdh5utn3oVWZn0AFpKXATf3sOXQSNfmR8P7bRWB6VvduhYV9w-mmQFSclg/exec",
+      "features": [
+        {
+          "id": "feature-2-1",
+          "name": "แก้ไขปัญหา Department Filtering + ทดสอบ",
+          "status": "in_progress",
+          "priority": "critical",
+          "files": ["download/google-apps-script/js.html"],
+          "depends_on": ["feature-1-6"],
+          "description": "แก้ไขโค้ดให้กรองงานตามฝ่าย (Department) และทดสอบ",
+          "acceptance_criteria": [
+            "✅ แก้ไข js.html loadData() function ให้เรียก getRequestsByDepartment()",
+            "⬜ Deploy โค้ดใหม่ด้วย clasp (หรือ copy manual)",
+            "⬜ ทดสอบล็อกอินด้วยแอดมิน → เห็นงานทุกสถานะ",
+            "⬜ ทดสอบล็อกอินด้วยฝ่ายใบเสนอราคา → เห็นเฉพาะ '💰 ขอใบเสนอราคา'",
+            "⬜ ทดสอบล็อกอินด้วยฝ่ายจัดซื้อ → เห็นเฉพาะ '🔧 เช็คอะไหล่เสนอราคา'"
+          ],
+          "test_status": "fix_deployed_awaiting_test",
+          "test_notes": "✅ แก้ไข js.html loadData() function แล้ว (line 90-110) เปลี่ยนจาก getRequests() เป็น getRequestsByDepartment(userDepartment) ⚠️ เนื่องจาก clasp auth error ต้อง Deploy manual ดังนี้:\n1. เปิด https://script.google.com/d/1craABvtLZS8O67dLJXrAP50oZoPLUssiTyI60Kh5k_mHTf7K3iY29Liy/edit\n2. เปิดไฟล์ js.html\n3. Copy โค้ดทั้งหมดจาก download/google-apps-script/js.html\n4. Replace โค้ดเดิม\n5. กด Save (Ctrl+S)\n6. กด Deploy > Manage deployments > Edit > Deploy new version",
+          "estimated_time": "10 นาที",
+          "completed_at": "2026-02-20",
+          "instructions": [
+            "1. ✅ แก้ไขโค้ดเสร็จแล้ว (js.html)",
+            "2. ⬜ เปิด Google Apps Script Editor",
+            "3. ⬜ Replace โค้ดใน js.html",
+            "4. ⬜ Deploy ใหม่",
+            "5. ⬜ ทดสอบการกรองตามฝ่าย"
+          ]
+        },
+        {
+          "id": "feature-2-2",
+          "name": "ทดสอบการล็อกอินด้วยแอดมิน",
+          "status": "pending",
+          "priority": "high",
+          "files": [],
+          "depends_on": ["feature-2-1"],
+          "description": "ล็อกอินด้วยฝ่ายแอดมิน (คุณสมชาย)",
+          "acceptance_criteria": [
+            "⬜ กดเลือก 'คุณสมชาย'",
+            "⬜ หน้าจอเปลี่ยนไปหน้าหลัก",
+            "⬜ เห็น Header พร้อมชื่อและฝ่าย",
+            "⬜ เห็น Dashboard Stats",
+            "⬜ เห็นปุ่ม '+ เพิ่มงาน'"
+          ],
+          "test_status": "not_started",
+          "test_notes": "",
+          "estimated_time": "2 นาที",
+          "instructions": [
+            "1. ในหน้า Login กดปุ่ม 'คุณสมชาย'",
+            "2. รอโหลด (ประมาณ 2-3 วินาที)",
+            "3. ตรวจสอบว่าเห็นหน้าหลัก"
+          ]
+        },
+        {
+          "id": "feature-2-3",
+          "name": "ทดสอบการสร้างงานใหม่",
+          "status": "pending",
+          "priority": "high",
+          "files": [],
+          "depends_on": ["feature-2-2"],
+          "description": "สร้างงานใหม่เพื่อทดสอบว่าบันทึกลง Google Sheets ได้",
+          "acceptance_criteria": [
+            "⬜ กดปุ่ม '+ เพิ่มงาน'",
+            "⬜ กรอกข้อมูลครบถ้วน (ชื่อ, เบอร์โทร)",
+            "⬜ กด 'บันทึก'",
+            "⬜ งานปรากฏในรายการ",
+            "⬜ สถานะเป็น '📥 รับเรื่องใหม่'",
+            "⬜ มีเลขที่เอกสาร (เช่น REQ-20260220-001)"
+          ],
+          "test_status": "not_started",
+          "test_notes": "",
+          "estimated_time": "5 นาที",
+          "instructions": [
+            "1. กดปุ่ม '+ เพิ่มงาน' มุมขวาบน",
+            "2. กรอกข้อมูล:",
+            "   - ชื่อลูกค้า: ทดสอบ 01",
+            "   - เบอร์โทร: 081-234-5678",
+            "   - ที่อยู่: 123 ถนนทดสอบ",
+            "   - ประเภทงาน: ล้างแอร์",
+            "   - รายละเอียด: ทดสอบระบบ",
+            "   - ความเร่งด่วน: ปกติ",
+            "3. กด 'บันทึก'",
+            "4. ตรวจสอบว่างานปรากฏในรายการ"
+          ]
+        },
+        {
+          "id": "feature-2-4",
+          "name": "ทดสอบการเปลี่ยนสถานะ",
+          "status": "pending",
+          "priority": "high",
+          "files": [],
+          "depends_on": ["feature-2-3"],
+          "description": "ทดสอบเปลี่ยนสถานะงานหลายๆ ครั้ง",
+          "acceptance_criteria": [
+            "⬜ กดปุ่ม '📋 ขอคิว'",
+            "⬜ สถานะเปลี่ยนเป็น '📋 ขอคิว'",
+            "⬜ กดปุ่ม '📅 ลงปฏิทินแล้ว'",
+            "⬜ สถานะเปลี่ยนเป็น '📅 ลงปฏิทินแล้ว'",
+            "⬜ มีประวัติการเปลี่ยนสถานะแสดงด้านล่าง",
+            "⬜ ตรวจสอบใน Google Sheets ว่าสถานะอัปเดต"
+          ],
+          "test_status": "not_started",
+          "test_notes": "",
+          "estimated_time": "5 นาที",
+          "instructions": [
+            "1. ในงานที่สร้างไว้ กดปุ่ม '📋 ขอคิว'",
+            "2. ตรวจสอบว่าสถานะเปลี่ยน",
+            "3. กดปุ่ม '📅 ลงปฏิทินแล้ว'",
+            "4. ตรวจสอบว่าสถานะเปลี่ยน",
+            "5. เปิด Google Sheets ดูว่าสถานะอัปเดตจริง"
+          ]
+        },
+        {
+          "id": "feature-2-5",
+          "name": "ทดสอบการ Logout และ Login ด้วยฝ่ายอื่น",
+          "status": "pending",
+          "priority": "high",
+          "files": [],
+          "depends_on": ["feature-2-4"],
+          "description": "ทดสอบว่าแต่ละฝ่ายเห็นเฉพาะงานของตัวเอง",
+          "acceptance_criteria": [
+            "⬜ กด 'ออกจากระบบ'",
+            "⬜ กลับไปหน้า Login",
+            "⬜ ล็อกอินด้วย 'คุณใบเสนอ' (ฝ่ายทำใบเสนอราคา)",
+            "⬜ เห็นเฉพาะงานที่มีสถานะ '💰 ขอใบเสนอราคา'",
+            "⬜ ไม่เห็นงานสถานะอื่น",
+            "⬜ กด 'ออกจากระบบ' แล้วล็อกอิน 'คุณจัดซื้อ'",
+            "⬜ เห็นเฉพาะงานที่มีสถานะ '🔧 เช็คอะไหล่เสนอราคา'"
+          ],
+          "test_status": "not_started",
+          "test_notes": "",
+          "estimated_time": "5 นาที",
+          "instructions": [
+            "1. กด 'ออกจากระบบ' มุมขวาบน",
+            "2. ล็อกอินด้วย 'คุณใบเสนอ'",
+            "3. สร้างงานใหม่ แล้วเลือกสถานะ '💰 ขอใบเสนอราคา'",
+            "4. Logout แล้วล็อกอิน 'คุณจัดซื้อ'",
+            "5. ตรวจสอบว่าเห็นเฉพาะงานที่ส่งมา"
+          ]
+        },
+        {
+          "id": "feature-2-6",
+          "name": "ทดสอบ Google Sheets Sync",
+          "status": "pending",
+          "priority": "high",
+          "files": [],
+          "depends_on": ["feature-2-3"],
+          "description": "ตรวจสอบว่าข้อมูลไปปรากฏใน Google Sheets จริง",
+          "acceptance_criteria": [
+            "⬜ เปิด Google Sheets",
+            "⬜ มี Sheet 'งานบริการ'",
+            "⬜ มีข้อมูลงานที่สร้างไว้",
+            "⬜ มีทุก Column (id, requestNo, createdAt, channel, customerName, ...)",
+            "⬜ ข้อมูลถูกต้อง",
+            "⬜ มี Sheet 'Users'",
+            "⬜ มีข้อมูลผู้ใช้ 8 คน"
+          ],
+          "test_status": "not_started",
+          "test_notes": "",
+          "estimated_time": "3 นาที",
+          "instructions": [
+            "1. เปิด Google Sheets ที่สร้างไว้",
+            "2. ดู Sheet แรกชื่อ 'งานบริการ'",
+            "3. ตรวจสอบข้อมูลที่สร้างไว้",
+            "4. ดู Sheet ที่สองชื่อ 'Users'",
+            "5. ตรวจสอบว่ามีผู้ใช้ 8 คน"
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "phase-3",
+      "name": "เพิ่มฟีเจอร์เสริม (Enhancements)",
+      "status": "pending",
+      "description": "เพิ่มฟีเจอร์ขั้นสูงหลังใช้งานได้",
+      "depends_on": ["phase-2"],
+      "features": [
+        {
+          "id": "feature-3-1",
+          "name": "เพิ่ม Telegram Notification",
+          "status": "pending",
+          "priority": "medium",
+          "files": ["Code.gs"],
+          "depends_on": ["phase-2"],
+          "description": "เพิ่มระบบแจ้งเตือนผ่าน Telegram Bot",
+          "acceptance_criteria": [
+            "⬜ สร้าง Telegram Bot",
+            "⬜ ได้ Bot Token",
+            "⬜ ได้ Chat ID",
+            "⬜ เพิ่มฟังก์ชัน sendTelegramNotification()",
+            "⬜ แจ้งเตือนเมื่อมีงานใหม่",
+            "⬜ แจ้งเตือนเมื่อเปลี่ยนสถานะ",
+            "⬜ แจ้งเตือนเฉพาะฝ่ายที่เกี่ยวข้อง"
+          ],
+          "test_status": "not_started",
+          "test_notes": "",
+          "estimated_time": "2 ชั่วโมง",
+          "instructions": []
+        },
+        {
+          "id": "feature-3-2",
+          "name": "เพิ่ม Google Calendar Integration",
+          "status": "pending",
+          "priority": "medium",
+          "files": ["Code.gs"],
+          "depends_on": ["feature-3-1"],
+          "description": "ลงปฏิทิน Google Calendar อัตโนมัติเมื่อนัดคิว",
+          "acceptance_criteria": [
+            "⬜ มีฟังก์ชัน addToCalendar()",
+            "⬜ สร้าง Event ใน Google Calendar",
+            "⬜ มีรายละเอียดครบ (ชื่อลูกค้า, เบอร์โทร, ที่อยู่)",
+            "⬜ ตั้งเวลาถูกต้อง"
+          ],
+          "test_status": "not_started",
+          "test_notes": "",
+          "estimated_time": "2 ชั่วโมง",
+          "instructions": []
+        },
+        {
+          "id": "feature-3-3",
+          "name": "เพิ่มระบบอัปโหลดวิดีโอ",
+          "status": "pending",
+          "priority": "low",
+          "files": ["Code.gs", "index.html"],
+          "depends_on": ["feature-3-2"],
+          "description": "รองรับการอัปโหลดวิดีโอนอกจากรูปภาพ",
+          "acceptance_criteria": [
+            "⬜ รองรับไฟล์วิดีโอ (mp4, mov)",
+            "⬜ อัปโหลดไป Google Drive ได้",
+            "⬜ แสดง preview วิดีโอ",
+            "⬜ มีขนาดไฟล์จำกัด (50MB)"
+          ],
+          "test_status": "not_started",
+          "test_notes": "",
+          "estimated_time": "2 ชั่วโมง",
+          "instructions": []
+        }
+      ]
+    }
+  ],
+
+  "summary": {
+    "total_features": 17,
+    "completed": 9,
+    "in_progress": 0,
+    "pending": 8,
+    "completion_percentage": 52.9
+  },
+
+  "warnings": [
+    "⚠️ อย่ากด 'เสร็จสิ้น' จนกว่าจะทดสอบจริงและผ่านทุก Acceptance Criteria",
+    "⚠️ อย่าข้าม Feature ไปทำ Feature ถัดไป (ถ้า depends_on มีค่า)",
+    "⚠️ ต้องทดสอบทุก Feature แม้จะดูง่าย",
+    "⚠️ ถ้าเจอปัญหา ให้บันทึกใน test_notes",
+    "⚠️ อย่าลบไฟล์โดยไม่แจ้งให้ผู้ใช้ทราบ"
+  ],
+
+  "claude_instructions": {
+    "before_starting": "อ่าน features.json ทั้งหมดก่อนเริ่มงาน",
+    "during_development": "อัปเดต features.json ทุกครั้งที่ทำเสร็จแต่ละ Feature",
+    "before_completing": "ตรวจสอบทุก Acceptance Criteria ก่อนเปลี่ยน status เป็น 'completed'",
+    "on_error": "บันทึกปัญหาใน test_notes อย่าเปลี่ยน status เป็น 'completed'",
+    "file_safety": "ห้ามลบไฟล์ใดๆ โดยไม่ได้รับอนุญาตจากผู้ใช้"
+  }
+}

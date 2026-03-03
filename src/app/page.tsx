@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 
 // Types
 type Department = 'admin' | 'quotation' | 'procurement'
-type Status = 'new' | 'queue' | 'scheduled' | 'quotation' | 'check_parts' | 'waiting_send' | 'sent' | 'cancelled'
+type Status = 'new' | 'queue' | 'waiting_quote' | 'checking_parts' | 'send_quote' | 'waiting_response' | 'completed' | 'cancelled'
 
 interface User {
   id: string
@@ -37,15 +37,15 @@ const DEPARTMENTS: Record<Department, { name: string; icon: string; color: strin
   procurement: { name: 'ฝ่ายจัดซื้อ', icon: '🛒', color: 'bg-orange-500' }
 }
 
-// Status config
+// Status config - aligned with STATUS_WORKFLOW.ts
 const STATUS_CONFIG: Record<Status, { label: string; icon: string; color: string; nextDepartment?: Department }> = {
   new: { label: 'รับเรื่องใหม่', icon: '📥', color: 'bg-slate-500', nextDepartment: undefined },
-  queue: { label: 'ขอคิว', icon: '📋', color: 'bg-blue-500', nextDepartment: 'admin' },
-  scheduled: { label: 'ลงปฏิทินแล้ว', icon: '📅', color: 'bg-indigo-500', nextDepartment: 'admin' },
-  quotation: { label: 'ขอใบเสนอราคา', icon: '💰', color: 'bg-green-500', nextDepartment: 'quotation' },
-  check_parts: { label: 'เช็คอะไหล่เสนอราคา', icon: '🔧', color: 'bg-orange-500', nextDepartment: 'procurement' },
-  waiting_send: { label: 'รอส่งลูกค้า', icon: '📤', color: 'bg-yellow-500', nextDepartment: 'admin' },
-  sent: { label: 'ส่งลูกค้าแล้ว', icon: '✅', color: 'bg-emerald-500', nextDepartment: undefined },
+  queue: { label: 'จองคิว / นัดหมาย', icon: '📋', color: 'bg-yellow-500', nextDepartment: 'admin' },
+  waiting_quote: { label: 'ขอใบเสนอราคา', icon: '💰', color: 'bg-orange-500', nextDepartment: 'quotation' },
+  checking_parts: { label: 'เช็คอะไหล่ + เสนอราคา', icon: '🔧', color: 'bg-indigo-500', nextDepartment: 'procurement' },
+  send_quote: { label: 'ส่งใบเสนอราคาแล้ว', icon: '📨', color: 'bg-teal-500', nextDepartment: 'admin' },
+  waiting_response: { label: 'รอลูกค้าตอบกลับ', icon: '⏳', color: 'bg-amber-500', nextDepartment: 'admin' },
+  completed: { label: 'เสร็จสิ้น', icon: '🏁', color: 'bg-gray-500', nextDepartment: undefined },
   cancelled: { label: 'ยกเลิก', icon: '❌', color: 'bg-red-500', nextDepartment: undefined }
 }
 
@@ -61,23 +61,23 @@ const USERS: User[] = [
   { id: 'procure1', name: 'คุณจัดซื้อ', department: 'procurement' }
 ]
 
-// Status transitions
+// Status transitions - aligned with STATUS_WORKFLOW.ts
 const STATUS_TRANSITIONS: Record<Status, Status[]> = {
-  new: ['queue', 'quotation', 'check_parts', 'cancelled'],
-  queue: ['scheduled', 'cancelled'],
-  scheduled: ['sent', 'cancelled'],
-  quotation: ['waiting_send', 'check_parts', 'cancelled'],
-  check_parts: ['quotation', 'cancelled'],
-  waiting_send: ['sent', 'cancelled'],
-  sent: [],
+  new: ['queue', 'waiting_quote', 'checking_parts', 'cancelled'],
+  queue: ['completed', 'cancelled'],
+  waiting_quote: ['send_quote', 'cancelled'],
+  checking_parts: ['send_quote', 'cancelled'],
+  send_quote: ['waiting_response', 'cancelled'],
+  waiting_response: ['new', 'cancelled'],
+  completed: [],
   cancelled: []
 }
 
-// Which department handles which status
+// Which department handles which status - aligned with STATUS_WORKFLOW.ts
 const STATUS_BY_DEPARTMENT: Record<Department, Status[]> = {
-  admin: ['new', 'queue', 'scheduled', 'waiting_send'],
-  quotation: ['quotation'],
-  procurement: ['check_parts']
+  admin: ['new', 'queue', 'send_quote', 'waiting_response', 'completed', 'cancelled'],
+  quotation: ['waiting_quote'],
+  procurement: ['checking_parts']
 }
 
 export default function Home() {
@@ -121,7 +121,7 @@ export default function Home() {
     try {
       const response = await fetch('/api/sheets')
       const result = await response.json()
-      
+
       if (result.data) {
         setRequests(result.data)
         setIsGoogleConfigured(true)
@@ -209,15 +209,15 @@ export default function Home() {
   // Filter requests by department
   const departmentRequests = useMemo(() => {
     if (!user) return []
-    
+
     let filtered = requests
-    
+
     // Filter by department
     if (user.department !== 'admin') {
       const allowedStatuses = STATUS_BY_DEPARTMENT[user.department]
       filtered = filtered.filter(r => allowedStatuses.includes(r.status))
     }
-    
+
     // Search
     if (searchTerm) {
       filtered = filtered.filter(r =>
@@ -226,30 +226,30 @@ export default function Home() {
         r.requestNo.toLowerCase().includes(searchTerm.toLowerCase())
       )
     }
-    
+
     // Status filter
     if (statusFilter !== 'all') {
       filtered = filtered.filter(r => r.status === statusFilter)
     }
-    
+
     return filtered
   }, [requests, user, searchTerm, statusFilter])
 
   // Stats for dashboard
   const stats = useMemo(() => {
     if (!user) return { total: 0, todo: 0, done: 0 }
-    
+
     const allowedStatuses = STATUS_BY_DEPARTMENT[user.department]
-    const deptRequests = user.department === 'admin' 
-      ? requests 
+    const deptRequests = user.department === 'admin'
+      ? requests
       : requests.filter(r => allowedStatuses.includes(r.status))
-    
-    const todoStatuses = ['new', 'queue', 'quotation', 'check_parts', 'waiting_send']
-    
+
+    const todoStatuses = ['new', 'queue', 'waiting_quote', 'checking_parts', 'send_quote', 'waiting_response']
+
     return {
       total: deptRequests.length,
       todo: deptRequests.filter(r => todoStatuses.includes(r.status)).length,
-      done: deptRequests.filter(r => r.status === 'sent').length
+      done: deptRequests.filter(r => r.status === 'completed').length
     }
   }, [requests, user])
 
@@ -267,12 +267,12 @@ export default function Home() {
         // Update
         const newStatus = formData.status as Status
         const statusChanged = newStatus !== editingRequest.status
-        
+
         const updatedRequest: ServiceRequest = {
           ...editingRequest,
           ...formData,
           status: newStatus,
-          history: statusChanged 
+          history: statusChanged
             ? [...editingRequest.history, { status: newStatus, date: new Date().toISOString(), by: user?.name || 'System' }]
             : editingRequest.history
         } as ServiceRequest
@@ -285,7 +285,7 @@ export default function Home() {
             body: JSON.stringify(updatedRequest)
           })
         }
-        
+
         setRequests(prev => prev.map(r => r.id === editingRequest.id ? updatedRequest : r))
       } else {
         // Create
@@ -315,7 +315,7 @@ export default function Home() {
             body: JSON.stringify(newRequest)
           })
         }
-        
+
         setRequests(prev => [newRequest, ...prev])
       }
       closeModal()
@@ -493,8 +493,8 @@ export default function Home() {
             <div className="flex items-center gap-2">
               {/* Storage indicator */}
               <div className={`px-2 py-1 rounded-lg text-xs font-medium ${isGoogleConfigured ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                    {isGoogleConfigured ? '☁️ Google Sheets' : '💾 Local Storage'}
-                  </div>
+                {isGoogleConfigured ? '☁️ Google Sheets' : '💾 Local Storage'}
+              </div>
               {user.department === 'admin' && (
                 <button
                   onClick={() => openModal()}
@@ -589,7 +589,7 @@ export default function Home() {
                     {STATUS_CONFIG[request.status].icon} {STATUS_CONFIG[request.status].label}
                   </span>
                 </div>
-                
+
                 <div className="mb-3">
                   <div className="font-semibold text-slate-800">{request.customerName}</div>
                   <div className="text-sm text-slate-500">{request.phone}</div>
@@ -599,9 +599,9 @@ export default function Home() {
                 {/* Image Preview */}
                 {request.imageUrl && (
                   <div className="mb-3">
-                    <img 
-                      src={request.imageUrl} 
-                      alt="รูปภาพ" 
+                    <img
+                      src={request.imageUrl}
+                      alt="รูปภาพ"
                       className="w-full max-w-xs rounded-xl border border-slate-200"
                       onError={(e) => {
                         (e.target as HTMLImageElement).style.display = 'none'
@@ -640,7 +640,7 @@ export default function Home() {
                       {STATUS_CONFIG[nextStatus].icon} {STATUS_CONFIG[nextStatus].label}
                     </button>
                   ))}
-                  
+
                   {/* Edit/Delete */}
                   <button
                     onClick={() => openModal(request)}
@@ -796,9 +796,9 @@ export default function Home() {
                 <div className="space-y-2">
                   {formData.imageUrl ? (
                     <div className="relative">
-                      <img 
-                        src={formData.imageUrl} 
-                        alt="Preview" 
+                      <img
+                        src={formData.imageUrl}
+                        alt="Preview"
                         className="w-full max-w-xs rounded-xl border border-slate-200"
                       />
                       <button
@@ -822,7 +822,7 @@ export default function Home() {
                         {uploadProgress !== null ? (
                           <div className="space-y-2">
                             <div className="w-full bg-slate-200 rounded-full h-2">
-                              <div 
+                              <div
                                 className="bg-blue-500 h-2 rounded-full transition-all"
                                 style={{ width: `${uploadProgress}%` }}
                               />
