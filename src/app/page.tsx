@@ -279,11 +279,12 @@ export default function Home() {
 
         // Try API first
         if (isGoogleConfigured) {
-          await fetch('/api/sheets', {
+          const res = await fetch('/api/sheets', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(updatedRequest)
           })
+          if (!res.ok) throw new Error('API error')
         }
 
         setRequests(prev => prev.map(r => r.id === editingRequest.id ? updatedRequest : r))
@@ -309,11 +310,12 @@ export default function Home() {
 
         // Try API first
         if (isGoogleConfigured) {
-          await fetch('/api/sheets', {
+          const res = await fetch('/api/sheets', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(newRequest)
           })
+          if (!res.ok) throw new Error('API error')
         }
 
         setRequests(prev => [newRequest, ...prev])
@@ -366,27 +368,35 @@ export default function Home() {
       history: [...request.history, { status: newStatus, date: new Date().toISOString(), by: user?.name || 'System' }]
     }
 
-    // Try API first
-    if (isGoogleConfigured) {
-      await fetch('/api/sheets', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedRequest)
-      })
+    try {
+      if (isGoogleConfigured) {
+        const res = await fetch('/api/sheets', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedRequest)
+        })
+        if (!res.ok) throw new Error('API error')
+      }
+      setRequests(prev => prev.map(r => r.id === id ? updatedRequest : r))
+    } catch (error) {
+      console.error('Error updating status:', error)
+      alert('อัปเดตสถานะไม่สำเร็จ กรุณาลองใหม่')
     }
-
-    setRequests(prev => prev.map(r => r.id === id ? updatedRequest : r))
   }
 
   const deleteRequest = async (id: string) => {
     if (!confirm('ยืนยันการลบรายการนี้?')) return
 
-    // Try API first
-    if (isGoogleConfigured) {
-      await fetch(`/api/sheets?id=${id}`, { method: 'DELETE' })
+    try {
+      if (isGoogleConfigured) {
+        const res = await fetch(`/api/sheets?id=${id}`, { method: 'DELETE' })
+        if (!res.ok) throw new Error('API error')
+      }
+      setRequests(prev => prev.filter(r => r.id !== id))
+    } catch (error) {
+      console.error('Error deleting:', error)
+      alert('ลบไม่สำเร็จ กรุณาลองใหม่')
     }
-
-    setRequests(prev => prev.filter(r => r.id !== id))
   }
 
   const formatDate = (dateStr: string) => {
