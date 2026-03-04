@@ -36,8 +36,15 @@ function include(filename) {
 
 // ==================== DATA OPERATIONS ====================
 
-// Get all service requests
+// Get all service requests (with 5-min cache)
 function getRequests() {
+  // Try cache first
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get('requests_v1');
+  if (cached) {
+    try { return JSON.parse(cached); } catch(e) {}
+  }
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!ss) {
     logErrorToSheet('ERROR: No active spreadsheet found!');
@@ -58,12 +65,10 @@ function getRequests() {
   const headers = data[0];
   const requests = [];
 
-  // Simple for loop (no forEach)
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     if (row[0]) {
       const obj = {};
-      // Manual property assignment (no forEach)
       for (let j = 0; j < headers.length; j++) {
         obj[headers[j]] = row[j] || '';
       }
@@ -71,8 +76,12 @@ function getRequests() {
     }
   }
 
-  // Force serialization to avoid Google Apps Script serialization issues
-  return JSON.parse(JSON.stringify(requests));
+  const result = JSON.parse(JSON.stringify(requests));
+
+  // Store in cache for 5 minutes (300 seconds)
+  try { cache.put('requests_v1', JSON.stringify(result), 300); } catch(e) {}
+
+  return result;
 }
 
 // Helper function to log errors to a debug sheet
@@ -185,8 +194,45 @@ function updateRequest(request) {
   return { success: false, error: 'Not found' }
 }
 
+// Wrapper: js.html เรียก createRequest แต่ฟังก์ชันจริงชื่อ addRequest
+function createRequest(data) {
+  return addRequest(data);
+}
+
+// Update status only (called from quick-action buttons in js.html)
+function updateStatus(id, newStatus) {
+  const sheet = getOrCreateSheet();
+  const data = sheet.getDataRange().getValues();
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] == id) {
+      const headers = data[0];
+      const existing = rowToObject(data[i], headers);
+
+      // Append to history
+      let history = [];
+      try { history = JSON.parse(existing.history || '[]'); } catch (e) {}
+      history.push({
+        status: newStatus,
+        date: new Date().toISOString(),
+        by: 'System'
+      });
+
+      existing.status = newStatus;
+      existing.history = JSON.stringify(history);
+
+      const row = objectToRow(existing, headers);
+      sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
+      CacheService.getScriptCache().remove('requests');
+      return { success: true };
+    }
+  }
+  return { success: false, error: 'Not found' };
+}
+
 // Delete request
 function deleteRequest(id) {
+
   const sheet = getOrCreateSheet()
   const data = sheet.getDataRange().getValues()
   
@@ -394,7 +440,7 @@ function analyzeImageWithAI(base64Data) {
       generationConfig: { response_mime_type: 'application/json' }
     };
 
-    const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + apiKey;
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
     const response = UrlFetchApp.fetch(url, {
       method: 'post',
       contentType: 'application/json',
@@ -426,7 +472,7 @@ function analyzeTextWithAI(text) {
       generationConfig: { response_mime_type: 'application/json' }
     };
 
-    const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + apiKey;
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
     const response = UrlFetchApp.fetch(url, {
       method: 'post',
       contentType: 'application/json',
@@ -443,6 +489,35 @@ function analyzeTextWithAI(text) {
   } catch (e) {
     return { success: false, error: e.toString() };
   }
+}
+
+// ==================== LIST MODELS (DIAGNOSTIC) ====================
+
+// รันฟังก์ชันนี้ใน GAS Editor เพื่อดูว่า API key รองรับ model อะไรบ้าง
+// เลือก listAvailableModels ใน dropdown แล้วกด Run ▶
+function listAvailableModels() {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!apiKey) {
+    Logger.log('❌ ไม่พบ GEMINI_API_KEY ใน Script Properties');
+    return;
+  }
+
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models?key=' + apiKey;
+  const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  const json = JSON.parse(response.getContentText());
+
+  if (json.error) {
+    Logger.log('❌ Error: ' + json.error.message);
+    return;
+  }
+
+  Logger.log('✅ Models ที่ใช้ generateContent ได้:');
+  (json.models || []).forEach(function(m) {
+    const supported = (m.supportedGenerationMethods || []);
+    if (supported.indexOf('generateContent') !== -1) {
+      Logger.log('  → ' + m.name + ' (' + m.displayName + ')');
+    }
+  });
 }
 
 // ==================== SETUP FUNCTION ====================
@@ -510,4 +585,46 @@ function runDiagnostics() {
   }
   Logger.log('=================================');
   return r;
+}
+
+// ==================== USER MANAGEMENT API ====================
+
+// Add new user
+function addUser(name, department) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  const sheet = ss.getSheetByName(CONFIG.USERS_SHEET)
+  const newId = 'user_' + Date.now()
+  sheet.appendRow([newId, name, department])
+  
+  // Return updated users list
+  const data = sheet.getDataRange().getValues()
+  const users = data.slice(1).map(row => ({
+    id: row[0],
+    name: row[1],
+    department: row[2]
+  }))
+  return { success: true, users: users }
+}
+
+// Delete user
+function deleteUser(id) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  const sheet = ss.getSheetByName(CONFIG.USERS_SHEET)
+  const data = sheet.getDataRange().getValues()
+  
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] == id) {
+      sheet.deleteRow(i + 1)
+      
+      // Return updated users list
+      const newData = sheet.getDataRange().getValues()
+      const users = newData.length > 1 ? newData.slice(1).map(row => ({
+        id: row[0],
+        name: row[1],
+        department: row[2]
+      })) : []
+      return { success: true, users: users }
+    }
+  }
+  return { success: false, error: 'User not found' }
 }

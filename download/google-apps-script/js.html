@@ -222,54 +222,97 @@
       const data = { ...state.formData }
       let result
       if (state.editingRequest) {
-        result = await googleScriptRun('updateRequest', state.editingRequest.id, data)
-      } else {
-        result = await googleScriptRun('createRequest', data)
-      }
-
-      if (result && result.success) {
+        // Merge id into data so Code.gs updateRequest(request) gets request.id
+        const mergedData = { ...data, id: state.editingRequest.id }
+        // Optimistic: update local state immediately
+        const oldRequests = [...state.requests]
+        state.requests = state.requests.map(r =>
+          String(r.id) === String(state.editingRequest.id) ? { ...r, ...mergedData } : r
+        )
         state.isModalOpen = false
         state.editingRequest = null
-        await loadData()
+        state.isSaving = false
+        render()
+        // Sync to GAS in background
+        result = await googleScriptRun('updateRequest', mergedData)
+        if (!result || !result.success) {
+          state.requests = oldRequests
+          render()
+          alert('บันทึกไม่สำเร็จ: ' + (result ? result.error : 'Unknown error'))
+        }
       } else {
-        alert('บันทึกไม่สำเร็จ: ' + (result ? result.error : 'Unknown error'))
+        // New request: wait for GAS to generate ID
+        result = await googleScriptRun('createRequest', data)
+        if (result && result.success) {
+          // Prepend new request from GAS response (has real ID)
+          const newReq = result.data || data
+          if (newReq.history && typeof newReq.history === 'string') {
+            try { newReq.history = JSON.parse(newReq.history) } catch (e) { newReq.history = [] }
+          }
+          state.requests = [newReq, ...state.requests]
+          state.isModalOpen = false
+          state.editingRequest = null
+        } else {
+          alert('บันทึกไม่สำเร็จ: ' + (result ? result.error : 'Unknown error'))
+        }
+        state.isSaving = false
+        render()
       }
     } catch (error) {
       console.error('Save error:', error)
       alert('บันทึกไม่สำเร็จ: ' + error.message)
-    } finally {
       state.isSaving = false
       render()
     }
   }
 
   async function updateStatus(id, newStatus) {
+    // Find request index
+    const idx = state.requests.findIndex(r => String(r.id) === String(id))
+    if (idx === -1) return
+    const oldRequest = { ...state.requests[idx] }
+
+    // Optimistic: update UI immediately
+    let history = []
+    try { history = JSON.parse(state.requests[idx].history || '[]') } catch (e) { }
+    history.push({ status: newStatus, date: new Date().toISOString(), by: (state.user && state.user.name) || 'System' })
+    state.requests[idx] = { ...state.requests[idx], status: newStatus, history: JSON.stringify(history) }
+    state.bottomSheet = null
+    render()
+
+    // Sync to GAS in background
     try {
       const result = await googleScriptRun('updateStatus', id, newStatus)
-      if (result && result.success) {
-        state.bottomSheet = null
-        await loadData()
-      } else {
+      if (!result || !result.success) {
+        state.requests[idx] = oldRequest  // revert
+        render()
         alert('อัปเดตสถานะไม่สำเร็จ: ' + (result ? result.error : 'Unknown error'))
       }
     } catch (error) {
-      console.error('Update status error:', error)
+      state.requests[idx] = oldRequest  // revert
+      render()
       alert('อัปเดตสถานะไม่สำเร็จ: ' + error.message)
     }
   }
 
   async function deleteRequest(id) {
     if (!confirm('ยืนยันการลบงานนี้?')) return
+    // Optimistic: remove from UI immediately
+    const oldRequests = [...state.requests]
+    state.requests = state.requests.filter(r => String(r.id) !== String(id))
+    state.bottomSheet = null
+    render()
+    // Sync to GAS in background
     try {
       const result = await googleScriptRun('deleteRequest', id)
-      if (result && result.success) {
-        state.bottomSheet = null
-        await loadData()
-      } else {
+      if (!result || !result.success) {
+        state.requests = oldRequests  // revert
+        render()
         alert('ลบไม่สำเร็จ: ' + (result ? result.error : 'Unknown error'))
       }
     } catch (error) {
-      console.error('Delete error:', error)
+      state.requests = oldRequests  // revert
+      render()
       alert('ลบไม่สำเร็จ: ' + error.message)
     }
   }
@@ -335,6 +378,76 @@
       alert('User not found: ' + id);
     }
   }
+
+  // ===== เพิ่มใหม่: จัดการ Dropdown & พนักงาน =====
+  window.onDeptChange = function () {
+    const deptSel = document.getElementById('loginDeptSelect');
+    const userSel = document.getElementById('loginUserSelect');
+    if (!deptSel || !userSel) return;
+    const dept = deptSel.value;
+    const opts = userSel.options;
+    for (let i = 0; i < opts.length; i++) {
+      const opt = opts[i];
+      if (!opt.value) { opt.style.display = ''; continue; }
+      opt.style.display = (!dept || opt.dataset.dept === dept) ? '' : 'none';
+    }
+    userSel.value = '';
+  };
+
+  window.doLogin = function () {
+    const userSel = document.getElementById('loginUserSelect');
+    if (!userSel || !userSel.value) { alert('กรุณาเลือกชื่อพนักงานก่อน'); return; }
+    window.loginById(userSel.value);
+  };
+
+  window.toggleManageUsers = function () {
+    const panel = document.getElementById('manageUsersPanel');
+    const chevron = document.getElementById('manageChevron');
+    if (!panel) return;
+    const open = panel.style.display === 'none';
+    panel.style.display = open ? 'block' : 'none';
+    if (chevron) chevron.textContent = open ? '▲' : '▼';
+  };
+
+  window.addUser = async function () {
+    const nameEl = document.getElementById('newUserName');
+    const deptEl = document.getElementById('newUserDept');
+    if (!nameEl || !deptEl) return;
+    const name = nameEl.value.trim();
+    const dept = deptEl.value;
+    if (!name) { alert('กรุณากรอกชื่อพนักงาน'); return; }
+    try {
+      const result = await googleScriptRun('addUser', name, dept);
+      if (result && result.success) {
+        state.users = result.users || state.users;
+        nameEl.value = '';
+        render();
+        setTimeout(function () {
+          const p = document.getElementById('manageUsersPanel');
+          const c = document.getElementById('manageChevron');
+          if (p) p.style.display = 'block';
+          if (c) c.textContent = '▲';
+        }, 50);
+      } else { alert('เพิ่มไม่สำเร็จ: ' + (result ? result.error : 'Unknown error')); }
+    } catch (e) { alert('เพิ่มไม่สำเร็จ: ' + e.message); }
+  };
+
+  window.deleteUser = async function (id) {
+    if (!confirm('ยืนยันลบพนักงานนี้?')) return;
+    try {
+      const result = await googleScriptRun('deleteUser', id);
+      if (result && result.success) {
+        state.users = result.users || state.users.filter(u => String(u.id) !== String(id));
+        render();
+        setTimeout(function () {
+          const p = document.getElementById('manageUsersPanel');
+          const c = document.getElementById('manageChevron');
+          if (p) p.style.display = 'block';
+          if (c) c.textContent = '▲';
+        }, 50);
+      } else { alert('ลบไม่สำเร็จ: ' + (result ? result.error : 'Unknown error')); }
+    } catch (e) { alert('ลบไม่สำเร็จ: ' + e.message); }
+  };
 
   window.logout = function () {
     state.user = null;
@@ -735,46 +848,65 @@
         </div>`;
     }
 
-    const adminUsers = state.users.filter(u => u.department === 'admin').map(u =>
-      '<button onclick="window.loginById(\'' + escapeAttr(u.id) + '\')"'
-      + ' style="background:white; border:1px solid #bfdbfe; padding:12px 16px; border-radius:10px; font-size:14px; font-weight:500; color:#1e293b; width:100%;">'
-      + escapeHtml(u.name) + '</button>'
+    // Build user options
+    const userOptions = state.users.map(u =>
+      '<option value="' + escapeAttr(u.id) + '" data-dept="' + escapeAttr(u.department) + '">' + escapeHtml(u.name) + '</option>'
     ).join('');
 
-    const quoteUsers = state.users.filter(u => u.department === 'quotation').map(u =>
-      '<button onclick="window.loginById(\'' + escapeAttr(u.id) + '\')"'
-      + ' style="background:white; border:1px solid #bbf7d0; padding:12px 16px; border-radius:10px; font-size:14px; font-weight:500; color:#1e293b; width:100%;">'
-      + escapeHtml(u.name) + '</button>'
-    ).join('');
-
-    const procUsers = state.users.filter(u => u.department === 'procurement').map(u =>
-      '<button onclick="window.loginById(\'' + escapeAttr(u.id) + '\')"'
-      + ' style="background:white; border:1px solid #fed7aa; padding:12px 16px; border-radius:10px; font-size:14px; font-weight:500; color:#1e293b; width:100%;">'
-      + escapeHtml(u.name) + '</button>'
+    // User list rows for manage section
+    const deptLabels = { admin: 'แอดมิน', quotation: 'ใบเสนอราคา', procurement: 'จัดซื้อ' };
+    const userListRows = state.users.map(u =>
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f5f9;">'
+      + '<span style="font-size:13px;color:#1e293b;">' + escapeHtml(u.name) + '</span>'
+      + '<span style="font-size:11px;color:#94a3b8;background:#f1f5f9;padding:2px 6px;border-radius:99px;margin-left:6px;">' + escapeHtml(deptLabels[u.department] || u.department) + '</span>'
+      + '<button onclick="window.deleteUser(\'' + escapeAttr(u.id) + '\')" style="margin-left:auto;background:none;border:none;color:#ef4444;font-size:16px;cursor:pointer;padding:0 4px;">🗑️</button>'
+      + '</div>'
     ).join('');
 
     return `
-      <div style="min-height:100vh; background:linear-gradient(135deg,#eff6ff 0%,#e0e7ff 100%); display:flex; align-items:center; justify-content:center; padding:20px;">
-        <div style="background:white; border-radius:24px; padding:32px; max-width:400px; width:100%; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
-          <div style="text-align:center; margin-bottom:32px;">
-            <div style="width:80px; height:80px; background:#3b82f6; border-radius:18px; display:flex; align-items:center; justify-content:center; font-size:40px; margin:0 auto 16px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);">❄️</div>
-            <h1 style="font-size:24px; font-weight:700; color:#1e293b; margin:0 0 8px 0;">ระบบรับงานบริการแอร์</h1>
-            <p style="color:#64748b; margin:0;">เลือกผู้ใช้เพื่อเข้าสู่ระบบ</p>
+      <div style="min-height:100vh;background:linear-gradient(135deg,#eff6ff 0%,#e0e7ff 100%);display:flex;align-items:center;justify-content:center;padding:20px;">
+        <div style="background:white;border-radius:24px;padding:32px;max-width:400px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
+
+          <div style="text-align:center;margin-bottom:24px;">
+            <div style="width:72px;height:72px;background:#3b82f6;border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:36px;margin:0 auto 12px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);">❄️</div>
+            <h1 style="font-size:22px;font-weight:700;color:#1e293b;margin:0 0 4px;">ระบบรับงานบริการแอร์</h1>
+            <p style="color:#64748b;font-size:13px;margin:0;">เลือกฝ่ายและชื่อเพื่อเข้าสู่ระบบ</p>
           </div>
-          <div style="display:flex; flex-direction:column; gap:12px;">
-            <div style="background:#eff6ff; border-radius:12px; padding:12px; border:1px solid #bfdbfe;">
-              <p style="font-size:14px; font-weight:500; color:#1d4ed8; margin:0 0 8px 0;">👤 ฝ่ายแอดมิน</p>
-              <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px;">${adminUsers}</div>
-            </div>
-            <div style="background:#f0fdf4; border-radius:12px; padding:12px; border:1px solid #bbf7d0;">
-              <p style="font-size:14px; font-weight:500; color:#166534; margin:0 0 8px 0;">📄 ฝ่ายทำใบเสนอราคา</p>
-              <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px;">${quoteUsers}</div>
-            </div>
-            <div style="background:#fff7ed; border-radius:12px; padding:12px; border:1px solid #fed7aa;">
-              <p style="font-size:14px; font-weight:500; color:#c2410c; margin:0 0 8px 0;">🛒 ฝ่ายจัดซื้อ</p>
-              <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px;">${procUsers}</div>
+
+          <div style="margin-bottom:16px;">
+            <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">ฝ่าย</label>
+            <select id="loginDeptSelect" onchange="window.onDeptChange()" style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;background:#f8fafc;margin-bottom:10px;">
+              <option value="">-- เลือกฝ่าย --</option>
+              <option value="admin">👤 ฝ่ายแอดมิน</option>
+              <option value="quotation">📄 ฝ่ายทำใบเสนอราคา</option>
+              <option value="procurement">🛒 ฝ่ายจัดซื้อ</option>
+            </select>
+            <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">ชื่อพนักงาน</label>
+            <select id="loginUserSelect" style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;background:#f8fafc;margin-bottom:14px;">
+              <option value="">-- เลือกชื่อ --</option>
+              ${userOptions}
+            </select>
+            <button onclick="window.doLogin()" style="width:100%;padding:12px;background:#3b82f6;color:white;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;">เข้าสู่ระบบ ➜</button>
+          </div>
+
+          <div style="border-top:1px solid #e2e8f0;padding-top:14px;">
+            <button onclick="window.toggleManageUsers()" style="width:100%;background:none;border:none;display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:600;color:#475569;cursor:pointer;padding:0;">
+              <span>⚙️ จัดการพนักงาน</span><span id="manageChevron">▼</span>
+            </button>
+            <div id="manageUsersPanel" style="display:none;margin-top:12px;">
+              <div style="display:flex;gap:8px;margin-bottom:10px;">
+                <input id="newUserName" type="text" placeholder="ชื่อพนักงานใหม่" style="flex:1;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;"/>
+                <select id="newUserDept" style="padding:8px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;">
+                  <option value="admin">แอดมิน</option>
+                  <option value="quotation">ใบเสนอราคา</option>
+                  <option value="procurement">จัดซื้อ</option>
+                </select>
+                <button onclick="window.addUser()" style="padding:8px 12px;background:#22c55e;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">+ เพิ่ม</button>
+              </div>
+              <div style="max-height:200px;overflow-y:auto;">${userListRows}</div>
             </div>
           </div>
+
         </div>
       </div>`;
   }
