@@ -20,11 +20,7 @@
   }
 
   // ==================== CONFIG ====================
-  const DEPARTMENTS = {
-    admin: { name: 'ฝ่ายแอดมิน', icon: '👤', color: 'bg-blue-500' },
-    quotation: { name: 'ฝ่ายทำใบเสนอราคา', icon: '📄', color: 'bg-green-500' },
-    procurement: { name: 'ฝ่ายจัดซื้อ', icon: '🛒', color: 'bg-orange-500' }
-  }
+  // (No departments — name-only system)
 
   // Status config - aligned with STATUS_WORKFLOW.ts
   const STATUS_CONFIG = {
@@ -48,13 +44,6 @@
     waiting_response: ['new', 'cancelled'],
     completed: [],
     cancelled: []
-  }
-
-  // Which department handles which status - aligned with STATUS_WORKFLOW.ts
-  const STATUS_BY_DEPARTMENT = {
-    admin: ['new', 'queue', 'send_quote', 'waiting_response', 'completed', 'cancelled'],
-    quotation: ['waiting_quote'],
-    procurement: ['checking_parts']
   }
 
   // ==================== THEME ====================
@@ -158,7 +147,9 @@
       appointmentDate: '',
       notes: '',
       imageUrl: ''
-    }
+    },
+    technicians: [],
+    bookingModal: null  // requestId of the job being booked
   }
 
   // ==================== GOOGLE APPS SCRIPT FUNCTIONS ====================
@@ -210,8 +201,8 @@
   }
 
   async function saveRequest() {
-    if (!state.formData.customerName || !state.formData.phone) {
-      alert('กรุณากรอกชื่อลูกค้าและเบอร์โทร')
+    if (!state.formData.customerName || !state.formData.phone || !state.formData.address) {
+      alert('กรุณากรอกชื่อลูกค้า เบอร์โทร และที่อยู่สถานที่ให้ครบถ้วน')
       return
     }
 
@@ -219,6 +210,16 @@
     render()
 
     try {
+      const datePart = document.getElementById('appointmentDate_date').value;
+      const timePart = document.getElementById('appointmentDate_time').value;
+      if (datePart && timePart) {
+        state.formData.appointmentDate = datePart + 'T' + timePart;
+      } else if (datePart) {
+        state.formData.appointmentDate = datePart + 'T00:00';
+      } else {
+        state.formData.appointmentDate = '';
+      }
+
       const data = { ...state.formData }
       let result
       if (state.editingRequest) {
@@ -271,18 +272,19 @@
     const idx = state.requests.findIndex(r => String(r.id) === String(id))
     if (idx === -1) return
     const oldRequest = { ...state.requests[idx] }
+    const byName = (state.user && state.user.name) || 'System'
 
     // Optimistic: update UI immediately
     let history = []
     try { history = JSON.parse(state.requests[idx].history || '[]') } catch (e) { }
-    history.push({ status: newStatus, date: new Date().toISOString(), by: (state.user && state.user.name) || 'System' })
+    history.push({ status: newStatus, date: new Date().toISOString(), by: byName })
     state.requests[idx] = { ...state.requests[idx], status: newStatus, history: JSON.stringify(history) }
     state.bottomSheet = null
     render()
 
-    // Sync to GAS in background
+    // Sync to GAS in background (pass byName so Code.gs records real name)
     try {
-      const result = await googleScriptRun('updateStatus', id, newStatus)
+      const result = await googleScriptRun('updateStatus', id, newStatus, byName)
       if (!result || !result.success) {
         state.requests[idx] = oldRequest  // revert
         render()
@@ -411,13 +413,11 @@
 
   window.addUser = async function () {
     const nameEl = document.getElementById('newUserName');
-    const deptEl = document.getElementById('newUserDept');
-    if (!nameEl || !deptEl) return;
+    if (!nameEl) return;
     const name = nameEl.value.trim();
-    const dept = deptEl.value;
-    if (!name) { alert('กรุณากรอกชื่อพนักงาน'); return; }
+    if (!name) { alert('กรุณากรอกชื่อก่อน'); return; }
     try {
-      const result = await googleScriptRun('addUser', name, dept);
+      const result = await googleScriptRun('addUser', name);
       if (result && result.success) {
         state.users = result.users || state.users;
         nameEl.value = '';
@@ -483,6 +483,120 @@
       alert('Request not found: ' + id);
     }
   }
+
+  // ==================== CALENDAR BOOKING ====================
+
+  window.openBookingModal = function (requestId) {
+    state.bookingModal = requestId;
+    state.bottomSheet = null;
+    render();
+    // Pre-fill datetime with current appointmentDate if set
+    setTimeout(function () {
+      const r = state.requests.find(function (x) { return String(x.id) === String(requestId); });
+      const dtDateEl = document.getElementById('bookingDate_date');
+      const dtTimeEl = document.getElementById('bookingDate_time');
+      if (dtDateEl && dtTimeEl && r && r.appointmentDate) {
+        try {
+          const d = new Date(r.appointmentDate);
+          if (!isNaN(d)) {
+            const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString();
+            dtDateEl.value = local.split('T')[0];
+            dtTimeEl.value = local.split('T')[1].substring(0, 5);
+          }
+        } catch (e) { }
+      }
+    }, 50);
+  };
+
+  window.closeBookingModal = function () {
+    state.bookingModal = null;
+    render();
+  };
+
+  window.saveBooking = async function () {
+    const dtDateEl = document.getElementById('bookingDate_date');
+    const dtTimeEl = document.getElementById('bookingDate_time');
+    const durEl = document.getElementById('bookingDuration');
+    const noteEl = document.getElementById('bookingNote');
+    if (!dtDateEl || !dtTimeEl) return;
+
+    let combinedDateTime = '';
+    if (dtDateEl.value && dtTimeEl.value) {
+      combinedDateTime = dtDateEl.value + 'T' + dtTimeEl.value;
+    } else if (dtDateEl.value) {
+      combinedDateTime = dtDateEl.value + 'T00:00';
+    }
+
+    // ไม่มีช่างแล้ว ใส่ค่าว่างไปเลย
+    const technicianName = '';
+    const technicianId = '';
+    const dateTimeISO = dtEl.value ? new Date(dtEl.value).toISOString() : '';
+    const duration = parseInt(durEl?.value || '60');
+    const note = noteEl?.value || '';
+
+    if (!dateTimeISO) { alert('\u0e01\u0e23\u0e38\u0e13\u0e32\u0e40\u0e25\u0e37\u0e2d\u0e01\u0e27\u0e31\u0e19\u0e41\u0e25\u0e30\u0e40\u0e27\u0e25\u0e32\u0e01\u0e48\u0e2d\u0e19'); return; }
+
+    const requestId = state.bookingModal;
+    const btn = document.getElementById('saveBookingBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '\u0e01\u0e33\u0e25\u0e31\u0e07\u0e2a\u0e23\u0e49\u0e32\u0e07\u0e19\u0e31\u0e14...'; }
+
+    try {
+      const result = await googleScriptRun('createCalendarEvent', requestId, technicianName, dateTimeISO, duration, note);
+      if (result && result.success) {
+        // Update local state optimistically
+        const idx = state.requests.findIndex(function (r) { return String(r.id) === String(requestId); });
+        if (idx !== -1) {
+          state.requests[idx].technicianName = technicianName;
+          state.requests[idx].calendarEventId = result.eventId;
+          state.requests[idx].appointmentDate = dateTimeISO;
+        }
+        state.bookingModal = null;
+        render();
+        alert('\u2705 \u0e2a\u0e23\u0e49\u0e32\u0e07\u0e19\u0e31\u0e14\u0e2b\u0e21\u0e32\u0e22\u0e43\u0e19\u0e1b\u0e0f\u0e34\u0e17\u0e34\u0e19\u0e40\u0e23\u0e35\u0e22\u0e1a\u0e23\u0e49\u0e2d\u0e22\u0e41\u0e25\u0e49\u0e27!\n\u0e0a\u0e48\u0e32\u0e07: ' + technicianName);
+      } else {
+        alert('\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08: ' + (result ? result.error : 'Unknown'));
+        if (btn) { btn.disabled = false; btn.textContent = '\u2796 \u0e22\u0e37\u0e19\u0e22\u0e31\u0e19\u0e2a\u0e23\u0e49\u0e32\u0e07\u0e19\u0e31\u0e14\u0e2b\u0e21\u0e32\u0e22'; }
+      }
+    } catch (e) {
+      alert('\u0e40\u0e01\u0e34\u0e14\u0e02\u0e49\u0e2d\u0e1c\u0e34\u0e14\u0e1e\u0e25\u0e32\u0e14: ' + e.message);
+      if (btn) { btn.disabled = false; btn.textContent = '\u2796 \u0e22\u0e37\u0e19\u0e22\u0e31\u0e19\u0e2a\u0e23\u0e49\u0e32\u0e07\u0e19\u0e31\u0e14\u0e2b\u0e21\u0e32\u0e22'; }
+    }
+  };
+
+  window.addTechnician = async function () {
+    const nameEl = document.getElementById('newTechName');
+    if (!nameEl) return;
+    const name = nameEl.value.trim();
+    if (!name) { alert('\u0e01\u0e23\u0e38\u0e13\u0e32\u0e01\u0e23\u0e2d\u0e01\u0e0a\u0e37\u0e48\u0e2d\u0e0a\u0e48\u0e32\u0e07'); return; }
+    try {
+      const result = await googleScriptRun('addTechnician', name);
+      if (result && result.success) {
+        state.technicians = result.technicians;
+        nameEl.value = '';
+        render();
+      } else { alert('\u0e40\u0e1e\u0e34\u0e48\u0e21\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08'); }
+    } catch (e) { alert(e.message); }
+  };
+
+  window.deleteTechnician = async function (id) {
+    if (!confirm('\u0e25\u0e1a\u0e0a\u0e48\u0e32\u0e07\u0e04\u0e19\u0e19\u0e35\u0e49?')) return;
+    try {
+      const result = await googleScriptRun('deleteTechnician', id);
+      if (result && result.success) {
+        state.technicians = result.technicians;
+        render();
+      }
+    } catch (e) { alert(e.message); }
+  };
+
+  window.toggleTechManager = function () {
+    const p = document.getElementById('techManagerPanel');
+    const c = document.getElementById('techManagerChevron');
+    if (!p) return;
+    const open = p.style.display !== 'none';
+    p.style.display = open ? 'none' : 'block';
+    if (c) c.textContent = open ? '\u25bc' : '\u25b2';
+  };
 
   window.closeModal = function () {
     state.isModalOpen = false;
@@ -832,9 +946,29 @@
       + renderJobList(paged, totalCount, state.currentPage, totalPages)
       + (state.isModalOpen ? renderModal() : '')
       + (state.bottomSheet ? renderBottomSheet() : '')
+      + renderBookingModal()
 
     attachEventListeners()
   }
+
+  // Login by selecting name from list OR typing a new name
+  window.doLoginByName = function () {
+    const sel = document.getElementById('loginUserSelect');
+    const inp = document.getElementById('loginNewName');
+    const selVal = sel ? sel.value : '';
+    const inpVal = inp ? inp.value.trim() : '';
+
+    if (selVal) {
+      // Existing user
+      window.loginById(selVal);
+    } else if (inpVal) {
+      // New name — create temp user locally (not saved to sheet)
+      state.user = { id: 'temp_' + Date.now(), name: inpVal };
+      loadData();
+    } else {
+      alert('กรุณาเลือกชื่อหรือกรอกชื่อใหม่ก่อน');
+    }
+  };
 
   function renderLoginPage() {
     if (!state.users || state.users.length === 0) {
@@ -842,24 +976,22 @@
         <div style="min-height:100vh; background:linear-gradient(135deg,#eff6ff 0%,#e0e7ff 100%); display:flex; align-items:center; justify-content:center; padding:20px;">
           <div style="background:white; border-radius:24px; padding:40px; max-width:400px; width:100%; text-align:center;">
             <h2 style="font-size:24px; color:#1e293b; margin-bottom:20px;">❄️ ระบบรับงานบริการแอร์</h2>
-            <p style="color:#64748b; margin-bottom:20px;">กำลังโหลดข้อมูลผู้ใช้...</p>
+            <p style="color:#64748b; margin-bottom:20px;">กำลังโหลดข้อมูล...</p>
             <div class="loading loading-border" style="width:40px; height:40px; margin:0 auto;"></div>
           </div>
         </div>`;
     }
 
-    // Build user options
+    // Build user options (name only)
     const userOptions = state.users.map(u =>
-      '<option value="' + escapeAttr(u.id) + '" data-dept="' + escapeAttr(u.department) + '">' + escapeHtml(u.name) + '</option>'
+      '<option value="' + escapeAttr(u.id) + '">' + escapeHtml(u.name) + '</option>'
     ).join('');
 
-    // User list rows for manage section
-    const deptLabels = { admin: 'แอดมิน', quotation: 'ใบเสนอราคา', procurement: 'จัดซื้อ' };
+    // User list rows for manage section (name only)
     const userListRows = state.users.map(u =>
-      '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f5f9;">'
-      + '<span style="font-size:13px;color:#1e293b;">' + escapeHtml(u.name) + '</span>'
-      + '<span style="font-size:11px;color:#94a3b8;background:#f1f5f9;padding:2px 6px;border-radius:99px;margin-left:6px;">' + escapeHtml(deptLabels[u.department] || u.department) + '</span>'
-      + '<button onclick="window.deleteUser(\'' + escapeAttr(u.id) + '\')" style="margin-left:auto;background:none;border:none;color:#ef4444;font-size:16px;cursor:pointer;padding:0 4px;">🗑️</button>'
+      '<div style="display:flex;align-items:center;padding:6px 0;border-bottom:1px solid #f1f5f9;">'
+      + '<span style="font-size:13px;color:#1e293b;flex:1;">' + escapeHtml(u.name) + '</span>'
+      + '<button onclick="window.deleteUser(\'' + escapeAttr(u.id) + '\')" style="background:none;border:none;color:#ef4444;font-size:16px;cursor:pointer;padding:0 4px;">🗑️</button>'
       + '</div>'
     ).join('');
 
@@ -870,38 +1002,28 @@
           <div style="text-align:center;margin-bottom:24px;">
             <div style="width:72px;height:72px;background:#3b82f6;border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:36px;margin:0 auto 12px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);">❄️</div>
             <h1 style="font-size:22px;font-weight:700;color:#1e293b;margin:0 0 4px;">ระบบรับงานบริการแอร์</h1>
-            <p style="color:#64748b;font-size:13px;margin:0;">เลือกฝ่ายและชื่อเพื่อเข้าสู่ระบบ</p>
+            <p style="color:#64748b;font-size:13px;margin:0;">เลือกชื่อเพื่อเข้าสู่ระบบ</p>
           </div>
 
           <div style="margin-bottom:16px;">
-            <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">ฝ่าย</label>
-            <select id="loginDeptSelect" onchange="window.onDeptChange()" style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;background:#f8fafc;margin-bottom:10px;">
-              <option value="">-- เลือกฝ่าย --</option>
-              <option value="admin">👤 ฝ่ายแอดมิน</option>
-              <option value="quotation">📄 ฝ่ายทำใบเสนอราคา</option>
-              <option value="procurement">🛒 ฝ่ายจัดซื้อ</option>
-            </select>
-            <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">ชื่อพนักงาน</label>
-            <select id="loginUserSelect" style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;background:#f8fafc;margin-bottom:14px;">
-              <option value="">-- เลือกชื่อ --</option>
+            <label style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">ชื่อของคุณ</label>
+            <select id="loginUserSelect" style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;background:#f8fafc;margin-bottom:10px;">
+              <option value="">— เลือกชื่อ —</option>
               ${userOptions}
             </select>
-            <button onclick="window.doLogin()" style="width:100%;padding:12px;background:#3b82f6;color:white;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;">เข้าสู่ระบบ ➜</button>
+            <p style="font-size:12px;color:#94a3b8;text-align:center;margin:0 0 8px;">―― หรือถ้าไม่มีชื่อ ――</p>
+            <input id="loginNewName" type="text" placeholder="กรอกชื่อใหม่ เช่น คุณสมชาย" style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;background:#f8fafc;margin-bottom:14px;box-sizing:border-box;"/>
+            <button onclick="window.doLoginByName()" style="width:100%;padding:12px;background:#3b82f6;color:white;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;">เข้าสู่ระบบ ➜</button>
           </div>
 
           <div style="border-top:1px solid #e2e8f0;padding-top:14px;">
             <button onclick="window.toggleManageUsers()" style="width:100%;background:none;border:none;display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:600;color:#475569;cursor:pointer;padding:0;">
-              <span>⚙️ จัดการพนักงาน</span><span id="manageChevron">▼</span>
+              <span>⚙️ จัดการรายชื่อ</span><span id="manageChevron">▼</span>
             </button>
             <div id="manageUsersPanel" style="display:none;margin-top:12px;">
               <div style="display:flex;gap:8px;margin-bottom:10px;">
-                <input id="newUserName" type="text" placeholder="ชื่อพนักงานใหม่" style="flex:1;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;"/>
-                <select id="newUserDept" style="padding:8px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;">
-                  <option value="admin">แอดมิน</option>
-                  <option value="quotation">ใบเสนอราคา</option>
-                  <option value="procurement">จัดซื้อ</option>
-                </select>
-                <button onclick="window.addUser()" style="padding:8px 12px;background:#22c55e;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">+ เพิ่ม</button>
+                <input id="newUserName" type="text" placeholder="เพิ่มชื่อใหม่..." style="flex:1;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:13px;"/>
+                <button onclick="window.addUser()" style="padding:8px 14px;background:#22c55e;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">+ เพิ่ม</button>
               </div>
               <div style="max-height:200px;overflow-y:auto;">${userListRows}</div>
             </div>
@@ -913,7 +1035,6 @@
 
   function renderHeader() {
     const T = getTheme();
-    const dept = DEPARTMENTS[state.user.department]
     const darkBtn = state.darkMode
       ? '<button onclick="window.toggleDarkMode()" title="โหมดสว่าง"'
       + ' style="padding:10px 12px; border-radius:12px; background:#334155; color:#fbbf24; font-size:16px; border:none; cursor:pointer;">☀️</button>'
@@ -926,15 +1047,13 @@
       + '<div style="width:40px; height:40px; background:#3b82f6; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:20px;">❄️</div>'
       + '<div>'
       + '<h1 style="font-size:18px; font-weight:700; color:' + T.textPrimary + '; margin:0;">ระบบรับงานบริการแอร์</h1>'
-      + '<p style="font-size:12px; color:' + T.textSecond + '; margin:0;">' + dept.icon + ' ' + escapeHtml(state.user.name) + ' • ' + escapeHtml(dept.name) + '</p>'
+      + '<p style="font-size:12px; color:' + T.textSecond + '; margin:0;">👤 ' + escapeHtml(state.user.name) + '</p>'
       + '</div>'
       + '</div>'
       + '<div style="display:flex; align-items:center; gap:8px;">'
       + '<div style="padding:4px 8px; border-radius:8px; font-size:12px; font-weight:500; background:' + T.badgeBg + '; color:' + T.badgeText + ';">☁️ Sheets</div>'
       + darkBtn
-      + (state.user.department === 'admin'
-        ? '<button onclick="window.openModal()" style="background:#3b82f6; color:white; padding:10px 14px; border-radius:12px; font-size:14px; font-weight:600; border:none; cursor:pointer;">+ เพิ่มงาน</button>'
-        : '')
+      + '<button onclick="window.openModal()" style="background:#3b82f6; color:white; padding:10px 14px; border-radius:12px; font-size:14px; font-weight:600; border:none; cursor:pointer;">+ เพิ่มงาน</button>'
       + '<button onclick="window.logout()" style="background:' + T.btnSecBg + '; color:' + T.textSecond + '; padding:10px 12px; border-radius:12px; font-size:13px; border:none; cursor:pointer;">ออก</button>'
       + '</div>'
       + '</div>'
@@ -1052,7 +1171,7 @@
       + '<input type="text" id="customerName" value="' + escapeAttr(state.formData.customerName) + '" style="' + inputStyle + '"></div>'
       + '<div><label style="' + labelStyle + '">เบอร์โทร <span style="color:#ef4444;">*</span></label>'
       + '<input type="tel" id="phone" value="' + escapeAttr(state.formData.phone) + '" style="' + inputStyle + '"></div>'
-      + '<div><label style="' + labelStyle + '">ที่อยู่ / สถานที่</label>'
+      + '<div><label style="' + labelStyle + '">ที่อยู่ / สถานที่ <span style="color:#ef4444;">*</span></label>'
       + '<textarea id="address" rows="2" style="' + inputStyle + ' resize:none;">' + escapeHtml(state.formData.address) + '</textarea></div>'
       + '<div><label style="' + labelStyle + '">ประเภทบริการ</label>'
       + '<select id="serviceType" style="' + inputStyle + '">'
@@ -1070,7 +1189,20 @@
       + '<option value="emergency" ' + (state.formData.priority === 'emergency' ? 'selected' : '') + '>🔴 ฉุกเฉิน</option>'
       + '</select></div>'
       + '<div><label style="' + labelStyle + '">วันที่นัดหมาย</label>'
-      + '<input type="datetime-local" id="appointmentDate" value="' + escapeAttr(state.formData.appointmentDate) + '" style="' + inputStyle + '"></div>'
+      + '<div style="display:flex; gap:8px;">'
+      + '<input type="date" id="appointmentDate_date" value="' + (state.formData.appointmentDate ? state.formData.appointmentDate.split('T')[0] : '') + '" style="' + inputStyle + ' flex:1;">'
+      + '<select id="appointmentDate_time" style="' + inputStyle + ' width:130px;">'
+      + '<option value="">ไม่ระบุเวลา</option>'
+      + Array.from({ length: 48 }, function (_, i) {
+        const h = Math.floor(i / 2);
+        const m = i % 2 === 0 ? '00' : '30';
+        const hStr = h.toString().padStart(2, '0');
+        const val = hStr + ':' + m;
+        const isSelected = (state.formData.appointmentDate && state.formData.appointmentDate.includes('T') && state.formData.appointmentDate.split('T')[1].substring(0, 5) === val) ? 'selected' : '';
+        return '<option value="' + val + '" ' + isSelected + '>' + val + ' น.</option>';
+      }).join('')
+      + '</select>'
+      + '</div></div>'
       + '<div><label style="' + labelStyle + '">หมายเหตุ</label>'
       + '<input type="text" id="notes" value="' + escapeAttr(state.formData.notes) + '" style="' + inputStyle + '"></div>'
       + '<div><label style="' + labelStyle + '">รูปภาพหน้างาน</label>'
@@ -1141,75 +1273,94 @@
     var history = []
     try { history = JSON.parse(r.history || '[]') } catch (e) { }
 
-    const priorityHtml = r.priority === 'emergency'
-      ? '<span style="padding:2px 7px;border-radius:6px;font-size:11px;background:#fee2e2;color:#b91c1c;">🔴 ฉุกเฉิน</span>'
+    // Priority badge
+    const priorityBadge = r.priority === 'emergency'
+      ? '<span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#fee2e2;color:#b91c1c;">🔴 ฉุกเฉิน</span>'
       : r.priority === 'urgent'
-        ? '<span style="padding:2px 7px;border-radius:6px;font-size:11px;background:#fef9c3;color:#a16207;">🟡 ด่วน</span>'
-        : '';
+        ? '<span style="padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#fef3c7;color:#92400e;">🟡 ด่วน</span>'
+        : ''
 
-    const hasDetail = r.address || r.description || r.imageUrl || r.notes || history.length > 1
+    // Last updated by
+    const lastHistory = history.length > 0 ? history[history.length - 1] : null
+    const lastBy = lastHistory && lastHistory.by && lastHistory.by !== 'System'
+      ? '<span style="font-size:11px;color:' + T.textFaint + ';">👤 ' + escapeHtml(lastHistory.by) + '</span>'
+      : ''
 
+    // Expanded details
     var expandedHtml = ''
     if (isExpanded) {
-      var dp = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid ' + T.divider + ';">'
-      if (r.address) dp += '<p style="font-size:13px;color:' + T.textSecond + ';margin:0 0 6px 0;">📍 ' + escapeHtml(r.address) + '</p>'
-      if (r.description) dp += '<p style="font-size:13px;color:' + T.textSecond + ';background:' + T.descBg + ';border-radius:8px;padding:8px;margin:0 0 8px 0;">' + escapeHtml(r.description) + '</p>'
-      if (r.notes) dp += '<p style="font-size:12px;color:' + T.textFaint + ';margin:0 0 6px 0;">📝 ' + escapeHtml(r.notes) + '</p>'
-      if (r.imageUrl) dp += '<img src="' + escapeAttr(r.imageUrl) + '" style="max-width:100%;max-height:200px;border-radius:10px;border:1px solid ' + T.cardBorder + ';display:block;margin-bottom:8px;" onerror="this.style.display=\'none\'">'
+      var dp = '<div style="margin-top:12px;padding-top:12px;border-top:1px solid ' + T.divider + ';display:flex;flex-direction:column;gap:8px;">'
+      if (r.address) dp += '<div style="display:flex;gap:6px;align-items:flex-start;"><span style="font-size:14px;">📍</span><span style="font-size:13px;color:' + T.textSecond + ';">' + escapeHtml(r.address) + '</span></div>'
+      if (r.description) dp += '<div style="background:' + T.descBg + ';border-radius:10px;padding:10px;font-size:13px;color:' + T.textSecond + ';line-height:1.5;">' + escapeHtml(r.description) + '</div>'
+      if (r.notes) dp += '<div style="display:flex;gap:6px;"><span>📝</span><span style="font-size:12px;color:' + T.textFaint + ';">' + escapeHtml(r.notes) + '</span></div>'
+      if (r.imageUrl) dp += '<img src="' + escapeAttr(r.imageUrl) + '" style="max-width:100%;max-height:180px;border-radius:10px;border:1px solid ' + T.cardBorder + ';object-fit:cover;" onerror="this.style.display=\'none\'">'
       if (history.length > 1) {
         dp += '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">'
-          + '<span style="font-size:11px;color:' + T.textFaint + ';">ประวัติ:</span>'
+          + '<span style="font-size:11px;color:' + T.textFaint + ';margin-right:2px;">ประวัติ:</span>'
           + history.map(function (h) {
             var hc = STATUS_CONFIG[h.status] || STATUS_CONFIG.new
-            return '<span style="font-size:11px;padding:2px 7px;border-radius:4px;color:white;background:' + hc.color + ';">' + hc.icon + ' ' + hc.label + '</span>'
-          }).join(' › ')
+            var byText = (h.by && h.by !== 'System') ? ' · ' + h.by : ''
+            return '<span style="font-size:11px;padding:2px 8px;border-radius:20px;color:white;background:' + hc.color + ';">' + hc.icon + ' ' + hc.label + byText + '</span>'
+          }).join('')
           + '</div>'
       }
       dp += '</div>'
       expandedHtml = dp
     }
 
+    const hasDetail = r.address || r.description || r.imageUrl || r.notes || history.length > 1
     var expandBtn = hasDetail
       ? '<button onclick="window.toggleCard(\'' + escapeAttr(r.id) + '\')"'
-      + ' style="padding:7px 11px;border-radius:9px;font-size:12px;background:' + T.btnSecBg + ';color:' + T.btnSecText + ';border:none;cursor:pointer;margin-left:auto;">'
-      + (isExpanded ? '▲ ย่อ' : '▼ ดูเพิ่ม') + '</button>'
-      : '';
+      + ' style="padding:7px 12px;border-radius:8px;font-size:12px;font-weight:500;background:' + T.btnSecBg + ';color:' + T.textSecond + ';border:none;cursor:pointer;">'
+      + (isExpanded ? '▲' : '▼ รายละเอียด') + '</button>'
+      : ''
 
-    return '<div style="background:' + T.cardBg + ';border-radius:14px;padding:14px;box-shadow:' + T.cardShadow + ';border:1px solid ' + T.cardBorder + ';">'
+    // Left accent color bar
+    const accentColor = sc.color || '#64748b'
 
-      // Row 1: requestNo + date + status
-      + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;">'
+    return '<div style="background:' + T.cardBg + ';border-radius:14px;box-shadow:' + T.cardShadow + ';border:1px solid ' + T.cardBorder + ';overflow:hidden;">'
+
+      // Colored top strip
+      + '<div style="height:3px;background:' + accentColor + ';"></div>'
+
+      // Card body
+      + '<div style="padding:14px 16px;">'
+
+      // Row 1: requestNo + date + status badge
+      + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
       + '<div style="display:flex;align-items:center;gap:6px;">'
-      + '<span style="font-size:11px;font-family:monospace;color:#2563eb;font-weight:600;">' + escapeHtml(r.requestNo || '') + '</span>'
+      + '<span style="font-size:11px;font-family:monospace;font-weight:700;color:#3b82f6;background:#eff6ff;padding:2px 7px;border-radius:6px;">' + escapeHtml(r.requestNo || '') + '</span>'
       + '<span style="font-size:11px;color:' + T.textFaint + ';">' + formatDate(r.createdAt) + '</span>'
       + '</div>'
-      + '<span style="padding:3px 9px;border-radius:6px;font-size:11px;font-weight:600;color:white;background:' + sc.color + ';white-space:nowrap;">'
+      + '<span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;color:white;background:' + accentColor + ';white-space:nowrap;">'
       + sc.icon + ' ' + sc.label + '</span>'
       + '</div>'
 
-      // Row 2: name + phone
-      + '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:7px;flex-wrap:wrap;">'
-      + '<span style="font-weight:700;font-size:16px;color:' + T.textPrimary + ';">' + escapeHtml(r.customerName || '') + '</span>'
-      + '<span style="font-size:13px;color:' + T.textSecond + ';">📞 ' + escapeHtml(r.phone || '') + '</span>'
+      // Row 2: Customer name + phone
+      + '<div style="margin-bottom:8px;">'
+      + '<span style="font-weight:700;font-size:17px;color:' + T.textPrimary + ';">' + escapeHtml(r.customerName || '') + '</span>'
+      + '<span style="font-size:13px;color:' + T.textSecond + ';margin-left:8px;">📞 ' + escapeHtml(r.phone || '') + '</span>'
       + '</div>'
 
-      // Row 3: chips
-      + '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;align-items:center;">'
-      + '<span style="background:' + T.chipBg + ';padding:2px 8px;border-radius:6px;font-size:12px;color:' + T.chipText + ';">' + escapeHtml(r.serviceType || '') + '</span>'
-      + '<span style="font-size:12px;color:' + T.textFaint + ';">' + escapeHtml(r.channel || '') + '</span>'
-      + priorityHtml
-      + (r.appointmentDate ? '<span style="font-size:12px;color:#7c3aed;">📅 ' + formatDate(r.appointmentDate) + '</span>' : '')
+      // Row 3: Tags
+      + '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px;align-items:center;">'
+      + '<span style="background:' + T.chipBg + ';padding:2px 9px;border-radius:20px;font-size:12px;color:' + T.chipText + ';font-weight:500;">' + escapeHtml(r.serviceType || '') + '</span>'
+      + '<span style="font-size:12px;color:' + T.textFaint + ';">· ' + escapeHtml(r.channel || '') + '</span>'
+      + priorityBadge
+      + (r.appointmentDate ? '<span style="font-size:12px;color:#7c3aed;background:#f5f3ff;padding:2px 8px;border-radius:20px;">📅 ' + formatDate(r.appointmentDate) + '</span>' : '')
+      + lastBy
       + '</div>'
 
-      // Action row: ⚡ จัดการ + expand toggle
+      // Row 4: Action buttons
       + '<div style="display:flex;gap:6px;align-items:center;">'
       + '<button onclick="window.openBottomSheet(\'' + escapeAttr(r.id) + '\')"'
-      + ' style="padding:8px 16px;border-radius:9px;font-size:13px;font-weight:600;background:#3b82f6;color:white;border:none;cursor:pointer;">'
-      + '⚡ จัดการ</button>'
+      + ' style="padding:8px 16px;border-radius:10px;font-size:13px;font-weight:600;background:#3b82f6;color:white;border:none;cursor:pointer;flex-shrink:0;">'
+      + '⚡ เปลี่ยนสถานะ</button>'
       + expandBtn
       + '</div>'
 
       + expandedHtml
+      + '</div>'
       + '</div>'
   }
 
@@ -1220,58 +1371,91 @@
 
     const sc = STATUS_CONFIG[r.status] || STATUS_CONFIG.new;
     const transitions = STATUS_TRANSITIONS[r.status || 'new'] || [];
+    const accentColor = sc.color || '#64748b';
 
+    // Last-updated-by from history
+    var history = []
+    try { history = JSON.parse(r.history || '[]') } catch (e) { }
+    const lastBy = history.length > 0 && history[history.length - 1].by
+      ? history[history.length - 1].by
+      : ''
+
+    // Status transition buttons — clean card style with left accent
     var transitionBtns = transitions.map(function (ns) {
       var nc = STATUS_CONFIG[ns] || STATUS_CONFIG.new;
       return '<button onclick="window.updateStatus(\'' + escapeAttr(r.id) + '\',\'' + escapeAttr(ns) + '\')"'
-        + ' style="width:100%; padding:14px; border-radius:12px; font-size:15px; font-weight:600;'
-        + ' background:' + nc.color + '; color:white; border:none; cursor:pointer; text-align:left;">'
-        + nc.icon + ' ' + nc.label
+        + ' style="width:100%; padding:14px 16px; border-radius:14px; font-size:15px; font-weight:600; cursor:pointer;'
+        + ' background:' + T.cardBg + '; color:' + T.textPrimary + ';'
+        + ' border:2px solid ' + nc.color + ';'
+        + ' display:flex; align-items:center; gap:10px;'
+        + ' transition:background 0.15s;">'
+        + '<span style="width:36px;height:36px;border-radius:50%;background:' + nc.color + ';display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">' + nc.icon + '</span>'
+        + '<span style="flex:1;text-align:left;">' + nc.label + '</span>'
+        + '<span style="font-size:16px;color:' + nc.color + ';">›</span>'
         + '</button>';
     }).join('');
 
     if (!transitionBtns) {
-      transitionBtns = '<p style="text-align:center; color:' + T.textFaint + '; font-size:13px; padding:8px 0; margin:0;">ไม่มีการเปลี่ยนสถานะที่ทำได้</p>';
+      transitionBtns = '<div style="text-align:center;padding:20px 0;">'
+        + '<div style="font-size:32px;margin-bottom:8px;">' + sc.icon + '</div>'
+        + '<p style="color:' + T.textFaint + ';font-size:14px;margin:0;">สถานะนี้ไม่สามารถเปลี่ยนต่อได้แล้ว</p>'
+        + '</div>';
     }
 
     return '<div style="position:fixed; inset:0; z-index:45;">'
       // Backdrop
       + '<div onclick="window.closeBottomSheet()"'
-      + ' style="position:absolute; inset:0; background:' + T.sheetOverlay + ';"></div>'
+      + ' style="position:absolute; inset:0; background:' + T.sheetOverlay + '; backdrop-filter:blur(2px);"></div>'
       // Panel
       + '<div style="position:absolute; bottom:0; left:0; right:0; background:' + T.sheetBg + ';'
-      + ' border-radius:20px 20px 0 0; border-top:1px solid ' + T.cardBorder + ';'
-      + ' max-height:85vh; overflow-y:auto;">'
+      + ' border-radius:24px 24px 0 0; border-top:3px solid ' + accentColor + ';'
+      + ' max-height:88vh; overflow-y:auto;">'
       // Handle
-      + '<div style="display:flex; justify-content:center; padding:12px 0 4px 0;">'
-      + '<div style="width:36px; height:4px; border-radius:2px; background:' + T.textFaint + ';"></div>'
+      + '<div style="display:flex; justify-content:center; padding:10px 0 0 0;">'
+      + '<div style="width:40px; height:4px; border-radius:2px; background:' + T.textFaint + '; opacity:0.4;"></div>'
       + '</div>'
       // Header
-      + '<div style="padding:12px 20px 16px 20px; border-bottom:1px solid ' + T.divider + ';">'
-      + '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">'
-      + '<span style="font-size:18px; font-weight:700; color:' + T.textPrimary + ';">' + escapeHtml(r.customerName || '') + '</span>'
-      + '<button onclick="window.closeBottomSheet()" style="background:none; border:none; font-size:20px; color:' + T.textFaint + '; cursor:pointer; padding:4px;">✕</button>'
+      + '<div style="padding:16px 20px 16px 20px;">'
+      + '<div style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:8px;">'
+      + '<div>'
+      + '<p style="font-size:12px;color:' + T.textFaint + ';margin:0 0 2px 0;font-family:monospace;font-weight:600;color:#3b82f6;">' + escapeHtml(r.requestNo || '') + '</p>'
+      + '<h2 style="font-size:20px; font-weight:800; color:' + T.textPrimary + '; margin:0 0 6px 0;">' + escapeHtml(r.customerName || '') + '</h2>'
+      + '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+      + '<span style="padding:4px 12px; border-radius:20px; font-size:12px; font-weight:700; color:white; background:' + accentColor + ';">' + sc.icon + '  ' + sc.label + '</span>'
+      + (r.phone ? '<span style="font-size:13px;color:' + T.textSecond + ';">📞 ' + escapeHtml(r.phone) + '</span>' : '')
+      + (lastBy ? '<span style="font-size:12px;color:' + T.textFaint + ';">· 👤 ' + escapeHtml(lastBy) + '</span>' : '')
       + '</div>'
-      + '<div style="display:flex; align-items:center; gap:8px;">'
-      + '<span style="font-size:11px; font-family:monospace; color:#2563eb; font-weight:600;">' + escapeHtml(r.requestNo || '') + '</span>'
-      + '<span style="padding:3px 9px; border-radius:6px; font-size:12px; font-weight:600; color:white; background:' + sc.color + ';">' + sc.icon + ' ' + sc.label + '</span>'
+      + '</div>'
+      + '<button onclick="window.closeBottomSheet()" style="background:' + T.inputBg + '; border:none; width:32px;height:32px;border-radius:50%;font-size:16px; color:' + T.textFaint + '; cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;">✕</button>'
       + '</div>'
       + '</div>'
+      + '<div style="height:1px;background:' + T.divider + ';margin:0 20px;"></div>'
+
+      // Calendar Booking Section (Only for Queue status)
+      + (r.status === 'queue' ?
+        '<div style="padding:16px 20px 0 20px;">'
+        + '<button onclick="window.openBookingModal(\'' + escapeAttr(r.id) + '\')" style="width:100%;padding:14px;border-radius:12px;background:#0f172a;color:white;border:none;cursor:pointer;font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;">'
+        + '📅 สร้างนัดหมายลงปฏิทิน'
+        + '</button>'
+        + (r.appointmentDate ? '<p style="margin:8px 0 0 0;font-size:13px;color:#059669;text-align:center;">✅ สร้างนัดหมายแล้ว</p>' : '')
+        + '</div>'
+        : '')
+
       // Transitions
-      + '<div style="padding:16px 20px;">'
-      + (transitions.length ? '<p style="font-size:12px; font-weight:600; color:' + T.textFaint + '; margin:0 0 10px 0; text-transform:uppercase; letter-spacing:0.5px;">เปลี่ยนสถานะเป็น</p>' : '')
+      + '<div style="padding:16px 20px 20px 20px;">'
+      + (transitions.length ? '<p style="font-size:11px; font-weight:700; color:' + T.textFaint + '; margin:0 0 12px 0; text-transform:uppercase; letter-spacing:1px;">→ เปลี่ยนสถานะเป็น</p>' : '')
       + '<div style="display:flex; flex-direction:column; gap:8px;">'
       + transitionBtns
       + '</div>'
       // Edit + Delete
       + '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:16px; padding-top:16px; border-top:1px solid ' + T.divider + ';">'
       + '<button onclick="window.openModalById(\'' + escapeAttr(r.id) + '\')"'
-      + ' style="padding:12px; border-radius:12px; font-size:14px; font-weight:500;'
-      + ' background:' + T.btnSecBg + '; color:' + T.textPrimary + '; border:none; cursor:pointer;">'
+      + ' style="padding:12px; border-radius:12px; font-size:14px; font-weight:600;'
+      + ' background:' + T.btnSecBg + '; color:' + T.textPrimary + '; border:1px solid ' + T.cardBorder + '; cursor:pointer;">'
       + '✏️ แก้ไขข้อมูล</button>'
       + '<button onclick="window.deleteRequest(\'' + escapeAttr(r.id) + '\')"'
-      + ' style="padding:12px; border-radius:12px; font-size:14px; font-weight:500;'
-      + ' background:#fef2f2; color:#dc2626; border:none; cursor:pointer;">'
+      + ' style="padding:12px; border-radius:12px; font-size:14px; font-weight:600;'
+      + ' background:#fef2f2; color:#dc2626; border:1px solid #fecaca; cursor:pointer;">'
       + '🗑️ ลบงาน</button>'
       + '</div>'
       + '</div>'
@@ -1290,6 +1474,10 @@
       console.log('=== INIT APP STARTED ===');
       state.users = await googleScriptRun('getUsers')
       console.log('Users loaded:', state.users.length);
+      // Load technicians (non-blocking)
+      googleScriptRun('getTechnicians').then(function (techs) {
+        state.technicians = techs || [];
+      }).catch(function () { state.technicians = []; });
       render()
       console.log('=== INIT APP FINISHED ===');
     } catch (e) {
@@ -1304,6 +1492,96 @@
       document.getElementById('app').style.display = 'block';
     }
   }
+
+  // ==================== BOOKING MODAL ====================
+  function renderBookingModal() {
+    if (!state.bookingModal) return '';
+    const T = getTheme();
+    const r = state.requests.find(function (x) { return String(x.id) === String(state.bookingModal); });
+    if (!r) return '';
+
+    const techOptions = state.technicians.length
+      ? state.technicians.map(function (t) {
+        return '<option value="' + escapeAttr(t.id) + '">' + escapeHtml(t.name) + '</option>';
+      }).join('')
+      : '<option value="" disabled>\u0e22\u0e31\u0e07\u0e44\u0e21\u0e48\u0e21\u0e35\u0e23\u0e32\u0e22\u0e0a\u0e37\u0e48\u0e2d\u0e0a\u0e48\u0e32\u0e07</option>';
+
+    const inputStyle = 'width:100%;padding:11px 12px;border-radius:10px;border:1px solid ' + T.inputBorder + ';font-size:14px;background:' + T.inputBg + ';color:' + T.textPrimary + ';box-sizing:border-box;';
+    const labelStyle = 'display:block;font-size:13px;font-weight:600;color:' + T.labelText + ';margin-bottom:6px;';
+
+    // Technician manager section
+    const techList = state.technicians.map(function (t) {
+      return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:8px;background:' + T.inputBg + ';margin-bottom:4px;">'
+        + '<span style="font-size:14px;color:' + T.textPrimary + ';">' + escapeHtml(t.name) + '</span>'
+        + '<button onclick="window.deleteTechnician(\'' + escapeAttr(t.id) + '\')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;padding:2px 6px;">\u00d7</button>'
+        + '</div>';
+    }).join('');
+
+    return '<div style="position:fixed;inset:0;z-index:60;">'
+      + '<div onclick="window.closeBookingModal()" style="position:absolute;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px);"></div>'
+      + '<div style="position:absolute;bottom:0;left:0;right:0;background:' + T.sheetBg + ';border-radius:24px 24px 0 0;border-top:3px solid #059669;max-height:92vh;overflow-y:auto;">'
+      + '<div style="display:flex;justify-content:center;padding:10px 0 0;"><div style="width:40px;height:4px;border-radius:2px;background:' + T.textFaint + ';opacity:0.4;"></div></div>'
+      // Header
+      + '<div style="padding:16px 20px;">'
+      + '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:4px;">'
+      + '<div>'
+      + '<p style="font-size:12px;font-family:monospace;font-weight:700;color:#3b82f6;margin:0 0 2px;">' + escapeHtml(r.requestNo || '') + '</p>'
+      + '<h2 style="font-size:20px;font-weight:800;color:' + T.textPrimary + ';margin:0 0 4px;">\ud83d\udcc5 \u0e2a\u0e23\u0e49\u0e32\u0e07\u0e19\u0e31\u0e14\u0e2b\u0e21\u0e32\u0e22</h2>'
+      + '<p style="font-size:14px;color:' + T.textSecond + ';margin:0;">' + escapeHtml(r.customerName || '') + (r.serviceType ? ' \u00b7 ' + escapeHtml(r.serviceType) : '') + '</p>'
+      + '</div>'
+      + '<button onclick="window.closeBookingModal()" style="background:' + T.inputBg + ';border:none;width:32px;height:32px;border-radius:50%;font-size:16px;color:' + T.textFaint + ';cursor:pointer;">✕</button>'
+      + '</div>'
+      + '</div>'
+      + '<div style="height:1px;background:' + T.divider + ';margin:0 20px;"></div>'
+      // Form body
+      + '<div style="padding:16px 20px 24px;display:flex;flex-direction:column;gap:14px;">'
+      // Date time
+      + '<div>'
+      + '<label style="' + labelStyle + '"><span style="font-size:16px;margin-right:4px;">\ud83d\udcca</span> \u0e27\u0e31\u0e19\u0e41\u0e25\u0e30\u0e40\u0e27\u0e25\u0e32\u0e19\u0e31\u0e14</label>'
+      + '<div style="display:flex; gap:8px;">'
+      + '<input type="date" id="bookingDate_date" style="flex:1;padding:14px 16px;border-radius:12px;border:2px solid #3b82f6;font-size:16px;font-weight:600;background:#eff6ff;color:#1e3a8a;box-sizing:border-box;">'
+      + '<select id="bookingDate_time" style="width:140px;padding:14px 16px;border-radius:12px;border:2px solid #3b82f6;font-size:16px;font-weight:600;background:#eff6ff;color:#1e3a8a;box-sizing:border-box;appearance:none;">'
+      + '<option value="">เวลา</option>'
+      + Array.from({ length: 48 }, function (_, i) {
+        const h = Math.floor(i / 2);
+        const m = i % 2 === 0 ? '00' : '30';
+        const hStr = h.toString().padStart(2, '0');
+        const val = hStr + ':' + m;
+        return '<option value="' + val + '">' + val + ' น.</option>';
+      }).join('')
+      + '</select>'
+      + '</div>'
+      + '</div>'
+      // Duration
+      + '<div>'
+      + '<label style="' + labelStyle + '">\u23f1 \u0e23\u0e30\u0e22\u0e30\u0e40\u0e27\u0e25\u0e32 (\u0e19\u0e32\u0e17\u0e35)</label>'
+      + '<select id="bookingDuration" style="' + inputStyle + '">'
+      + '<option value="30" selected>30 นาที</option>'
+      + '<option value="60">1 ชั่วโมง</option>'
+      + '<option value="90">1.5 ชั่วโมง</option>'
+      + '<option value="120">2 ชั่วโมง</option>'
+      + '<option value="180">3 ชั่วโมง</option>'
+      + '<option value="240">4 ชั่วโมง</option>'
+      + '<option value="300">5 ชั่วโมง</option>'
+      + '<option value="360">6 ชั่วโมง</option>'
+      + '<option value="420">7 ชั่วโมง</option>'
+      + '<option value="480">8 ชั่วโมง (เต็มวัน)</option>'
+      + '</select>'
+      + '</div>'
+      // Note
+      + '<div>'
+      + '<label style="' + labelStyle + '">\ud83d\udcdd \u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38 (\u0e16\u0e49\u0e32\u0e21\u0e35)</label>'
+      + '<textarea id="bookingNote" rows="2" style="' + inputStyle + 'resize:none;">' + escapeHtml(r.notes || '') + '</textarea>'
+      + '</div>'
+      // Save button
+      + '<button id="saveBookingBtn" onclick="window.saveBooking()" style="width:100%;padding:14px;border-radius:14px;font-size:16px;font-weight:700;background:#059669;color:white;border:none;cursor:pointer;">'
+      + '\ud83d\udcc5 \u0e22\u0e37\u0e19\u0e22\u0e31\u0e19\u0e2a\u0e23\u0e49\u0e32\u0e07\u0e19\u0e31\u0e14\u0e2b\u0e21\u0e32\u0e22'
+      + '</button>'
+      + '</div>'
+      + '</div>'
+      + '</div>';
+  }
+
 
   console.log('=== PAGE LOADED ===');
   initApp();

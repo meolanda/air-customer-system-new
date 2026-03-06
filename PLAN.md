@@ -1,327 +1,94 @@
-# แผนการแก้ไขโปรเจค: ระบบรับงานบริการแอร์
+# 🚀 Technical Execution Plan: Aircon Service Master
+**วันที่จัดทำแผน:** 5 มีนาคม 2026
+**สถานะโปรเจกต์:** MVP (ใช้งานได้จริง, มี AI ถอดข้อความ, เชื่อม Google Calendar)
 
-> สร้างโดย: Claude Code | วันที่: 2026-03-02
-> อ้างอิงจาก: Code Review Session
-
----
-
-## สรุปปัญหาทั้งหมด
-
-| # | ระดับ | ปัญหา | ไฟล์ที่เกี่ยวข้อง |
-|---|-------|--------|------------------|
-| 1 | 🔴 Critical | Status Type มี 3 ชุดขัดแย้งกัน | `page.tsx`, `STATUS_WORKFLOW.ts`, `js.html` |
-| 2 | 🔴 Critical | GAS js.html แก้แล้วแต่ยังไม่ deploy | `download/google-apps-script/js.html` |
-| 3 | 🟡 Medium | `page.tsx` monolithic 893 บรรทัด | `src/app/page.tsx` |
-| 4 | 🟡 Medium | ไม่มี try/catch ใน updateStatus / deleteRequest | `src/app/page.tsx` |
-| 5 | 🟡 Medium | Git ค้าง — ไฟล์ modified + untracked ไม่ได้ commit | `Code.gs`, `appsscript.json`, `js.html`, `features.json` |
-| 6 | 🟢 Minor | Prisma schema ไม่ reflect domain จริง | `prisma/schema.prisma` |
-| 7 | 🟢 Minor | `STATUS_WORKFLOW.ts` เป็น dead code (ไม่มีใคร import) | `src/lib/STATUS_WORKFLOW.ts` |
+เอกสารฉบับนี้คือ "เข็มทิศ" ในการพัฒนาแอปพลิเคชัน Aircon Service Master เพื่อยกระดับความปลอดภัยและเตรียมความพร้อมในการขยายสเกล (Scaling) โดยแบ่งการทำงานออกเป็น 2 ระยะ (Sprints) อย่างชัดเจน
 
 ---
 
-## แผนดำเนินการ (เรียงลำดับ)
+## 🏗️ สถาปัตยกรรมระบบใหม่ (Architecture Decision)
+*   **Web Framework (หน้าจอและ API):** `Next.js 15` (เร็วขึ้น, สวยงาม, จัดการง่ายกว่า Google Apps Script แบบเดิม)
+*   **Real-time Buffer (ระบบพักข้อมูล):** `Firebase` (แก้ปัญหาพิมพ์ชนกัน, หน้าเว็บอัปเดตเรียลไทม์โดยไม่ต้องรีเฟรช, รองรับคนพร้อมกันเยอะๆ)
+*   **Permanent Storage (ฐานข้อมูลถาวร):** `Google Sheets` (ยังใช้ไฟล์เดิมเป็นสมุดบัญชีหลัก เพื่อเก็บประวัติงานย้อนหลังทั้งหมด)
+*   **Hosting (บ้านของเว็บเรา):** `Vercel` (บริการฝากโค้ดฟรี โหลดเร็วระดับโลก)
 
 ---
 
-### ขั้นที่ 1 — กำหนด Status ชุดเดียวให้ทั้งระบบ (Critical)
+## 🛡️ Sprint 1: The First Shield (แก้ปัญหาเร่งด่วน)
+**เป้าหมายหลัก:** อุดช่องโหว่ข้อมูลลูกค้ารั่วไหล และป้องกันแอปพลิเคชันค้างจากการโหลดข้อมูลสะสมจำนวนมาก (The 1,000-Row Timebomb)
 
-**ปัญหา:** มี 3 ชุด Status ที่ไม่ตรงกัน
+### 📌 Task 1.1: PIN Code Authentication (ความปลอดภัยด่านแรก)
+ป้องกันไม่ให้บุคคลภายนอกที่มีลิงก์เว็บเข้าถึงหน้าข้อมูลลูกค้าได้ โดยใช้รหัสผ่านกลางของร้าน
+*   **Action Items:**
+    *   [ ] สร้าง Environment Variable (`NEXT_PUBLIC_STORE_PIN`) ในไฟล์ `.env.local`
+    *   [ ] ปรับปรุงไฟล์ `src/app/page.tsx`
+    *   [ ] สร้าง UI หน้าจอใส่รหัส PIN 6 หลัก ก่อนเข้าสู่หน้า "เลือกชื่อผู้ใช้งาน"
+    *   [ ] เขียน Logic ตรวจสอบ PIN และเก็บสถานะการเข้าระบบ (Authentication State) ไว้ใน `sessionStorage` (ต้องล็อกอินใหม่ทุกครั้งที่ปิดเบราว์เซอร์)
 
-- `STATUS_WORKFLOW.ts`: `waiting_quote | checking_parts | send_quote | waiting_response | completed`
-- `page.tsx` local: `scheduled | quotation | check_parts | waiting_send | sent`
-- `js.html` (GAS): ชุดที่ 3 (ต้องตรวจสอบ)
-
-**วิธีแก้:** เลือกใช้ชุดจาก `STATUS_WORKFLOW.ts` เป็น source of truth เพราะออกแบบมาแล้วและตรงกับ business logic ใน PRD
-
-**Status ที่ถูกต้อง (8 statuses):**
-
-```
-new              → รับเรื่องใหม่
-queue            → จองคิว / นัดหมาย
-waiting_quote    → ขอใบเสนอราคา
-checking_parts   → เช็คอะไหล่ + เสนอราคา
-send_quote       → ส่งใบเสนอราคาแล้ว
-waiting_response → รอลูกค้าตอบกลับ
-completed        → เสร็จสิ้น
-cancelled        → ยกเลิก
-```
-
-**ไฟล์ที่ต้องแก้:**
-
-1. **`src/app/page.tsx`**
-   - แก้ `type Status` ให้ตรงกับ `StatusValue` ใน STATUS_WORKFLOW.ts
-   - แก้ `STATUS_CONFIG` (local) ให้ตรงกับ statuses ใหม่
-   - แก้ `STATUS_TRANSITIONS` ให้ตรงกับ `nextStatuses` ใน STATUS_WORKFLOW.ts
-   - แก้ `STATUS_BY_DEPARTMENT` ให้ map department → statuses ใหม่
-   - ลบ `scheduled`, `quotation` (ชื่อเก่า), `check_parts`, `waiting_send`, `sent` ออก
-
-2. **`src/lib/STATUS_WORKFLOW.ts`**
-   - export ให้ใช้งานได้จริง (ปัจจุบันเป็น dead code)
-   - พิจารณา import มาใช้ใน page.tsx แทนการนิยามซ้ำ
-
-3. **`download/google-apps-script/js.html`**
-   - ตรวจสอบและ sync Status names ให้ตรงกับชุดใหม่
-   - แก้ department filtering logic ให้ใช้ statuses ใหม่
-
-4. **`download/google-apps-script/Code.gs`**
-   - ตรวจสอบ status string ที่ใช้ใน GAS backend
-
-**Acceptance Criteria:**
-- [ ] ทั้ง `page.tsx` และ `STATUS_WORKFLOW.ts` ใช้ status string เดียวกัน
-- [ ] ทั้ง GAS `js.html` ใช้ status string เดียวกัน
-- [ ] TypeScript compile ไม่มี error
-- [ ] Status badge แสดงผลถูกต้อง
+### 📌 Task 1.2: Server-Side Data Filtering (ลดภาระเครื่องลูกค้า)
+ป้องกันไม่ให้มือถือของช่าง/แอดมินต้องโหลดข้อมูลประวัติงานนับพันรายการในครั้งเดียว
+*   **Action Items:**
+    *   [ ] ปรับปรุงไฟล์ API ฐานข้อมูล: `src/app/api/sheets/route.ts` (ในฟังก์ชัน `GET()`)
+    *   [ ] เพิ่ม Logic การคัดกรองข้อมูลก่อนส่งกลับไปยังหน้าเว็บ (Frontend)
+    *   [ ] **เงื่อนไขการดึงข้อมูล:**
+        1. ดึงงานที่สถานะยังไม่เสร็จสิ้น (Active Jobs) ทั้งหมด
+        2. งานที่ "เสร็จสิ้น (Completed)" หรือ "ยกเลิก (Cancelled)" ให้ดึงเฉพาะงานที่มีอายุ **ไม่เกิน 30 วัน**
 
 ---
 
-### ขั้นที่ 2 — แก้ Department Filtering ใน page.tsx (ตามมาจากขั้นที่ 1)
+## ⚙️ Sprint 1.5: Porting Legacy Features (เติมฟีเจอร์เดิมให้เต็ม 100%)
+**เป้าหมายหลัก:** นำฟีเจอร์เด่นจากแอป Google Apps Script เดิม กลับมาใส่ในหน้าจอและ API ของ Next.js ให้ครบถ้วนสมบูรณ์ที่สุดก่อนขยายระบบ
 
-**ปัญหา:** `STATUS_BY_DEPARTMENT` ใช้ statuses เก่า ทำให้ filter ผิด
+### 📌 Task 1.5.1: AI Assistant & Automation
+*   **Action Items:**
+    *   [ ] อัปเดตตลับคีย์ `GEMINI_API_KEY` ใน `.env.local`
+    *   [ ] สร้าง API route สำหรับรับข้อความ/รูปภาพ แล้วส่งไปวิเคราะห์ด้วย Gemini (`/api/ai/analyze`)
+    *   [ ] นำ UI เดิมของปุ่ม "AI ช่วยเติมข้อมูล" (อัดเสียง, สแกนรูป) กลับมาไว้ในหน้า `+ เพิ่มงาน`
+    *   [ ] เพิ่ม Logic หน้าจอให้ดึงค่า JSON กลับมายัดลงแบบฟอร์มอัตโนมัติ (Smart Paste)
 
-**ปัจจุบัน (ผิด):**
-```ts
-const STATUS_BY_DEPARTMENT: Record<Department, Status[]> = {
-  admin: ['new', 'queue', 'scheduled', 'waiting_send'],   // scheduled ไม่มีแล้ว
-  quotation: ['quotation'],                                // quotation ไม่มีแล้ว
-  procurement: ['check_parts']                             // check_parts ไม่มีแล้ว
-}
-```
+### 📌 Task 1.5.2: Calendar & Technician Management
+*   **Action Items:**
+    *   [ ] สร้าง API route ให้สามารถอ่าน/เขียนข้อมูลรายชื่อ "ช่าง" จากชีท `ช่าง`
+    *   [ ] สร้าง API route ให้เชื่อมต่อกับ **Google Calendar API** (`/api/calendar`)
+    *   [ ] เพิ่มปุ่มและ UI "สร้างนัดหมายลงปฏิทิน" ในหน้ารายละเอียดงาน (Bottom Sheet)
+    *   [ ] เพิ่มฟอร์มบริหารรายชื่อช่าง (เพิ่ม/ลบ ช่าง) ในหน้า Admin แถบจัดการ
 
-**แก้เป็น (ตาม Business Logic):**
-```ts
-const STATUS_BY_DEPARTMENT: Record<Department, Status[]> = {
-  admin: ['new', 'queue', 'send_quote', 'waiting_response', 'completed', 'cancelled'],
-  quotation: ['waiting_quote'],
-  procurement: ['checking_parts']
-}
-```
-
-**Acceptance Criteria:**
-- [ ] ฝ่ายแอดมิน เห็นงานทุกสถานะ (หรือกรอง admin statuses)
-- [ ] ฝ่ายใบเสนอราคา เห็นเฉพาะ `waiting_quote`
-- [ ] ฝ่ายจัดซื้อ เห็นเฉพาะ `checking_parts`
+### 📌 Task 1.5.3: Image Upload (Google Drive Storage)
+*   **Action Items:**
+    *   [ ] นำ Logic การอัปโหลดรูปภาพผ่าน Service Account โยนเข้าโฟลเดอร์ Google Drive มาใช้ใน Next.js API (`/api/upload`)
+    *   [ ] ทำให้หน้าเว็บโชว์และรองรับการแนบไฟล์ภาพคู่กับใบงาน
 
 ---
 
-### ขั้นที่ 3 — Deploy GAS Manual (Critical)
+## 🏗️ Sprint 2: Collaboration & Concurrency (ระบบใช้งานพร้อมกันและแจ้งเตือน)
+**เป้าหมายหลัก:** วางโครงสร้างระบบใหม่เพื่อรองรับแอดมินหลายคนทำงานพร้อมกัน (Concurrency) และกระจายงานให้ทีมหลังบ้านอัตโนมัติ
 
-**ปัญหา:** `clasp` auth error → js.html ที่แก้ไขยังไม่ได้ขึ้น Google Apps Script จริง
+### 📌 Task 2.1: ระบบพักข้อมูลด้วย Firebase (Real-time Buffer)
+แก้ปัญหาการพิมพ์ชนกัน และทำให้หน้าเว็บไม่อืด โดยใช้ Firebase เป็นตัวพักข้อมูลตรงกลางก่อนส่งไปอัปเดตบรรทัดที่เสร็จแล้วลง Google Sheets
+*   **Action Items:**
+    *   [ ] ศึกษาและเชื่อมต่อ **Firebase (Firestore หรือ Realtime Database)**
+    *   [ ] ปรับให้หน้าเว็บแอปของแอดมิน อ่านและเขียนข้อมูลกับ Firebase แทนการดึงจาก Google Sheets โดยตรง
+    *   [ ] เขียน Logic (Firebase Cloud Functions / Next.js API) เพื่อ Sync ข้อมูลกลับไปบันทึกลง Google Sheets เฉพาะเมื่องานมีสถานะเป็น "เสร็จสิ้น (Completed)" หรือ "ยกเลิก (Cancelled)" เพื่อเก็บเป็นประวัติ (Archive)
 
-**ขั้นตอน Manual Deploy:**
-1. เปิด: `https://script.google.com/d/1craABvtLZS8O67dLJXrAP50oZoPLUssiTyI60Kh5k_mHTf7K3iY29Liy/edit`
-2. เปิดไฟล์ `js.html` ใน sidebar
-3. Copy โค้ดทั้งหมดจาก `download/google-apps-script/js.html` (local)
-4. Replace โค้ดเดิมใน editor
-5. กด Save (Ctrl+S)
-6. กด **Deploy > Manage deployments**
-7. เลือก deployment ที่มีอยู่ > กด ✏️ Edit
-8. เลือก "New version"
-9. กด Deploy
-10. ทดสอบที่ Web App URL
+### 📌 Task 2.2: ระบบแจ้งเตือนงานทีมหลังบ้าน (Telegram Integration)
+กระจายงานให้ทีมช่าง, จัดซื้อ หรือฝ่ายเสนอราคา ผ่านแอปพลิเคชันที่คุ้นเคย โดยไม่ต้องให้ทุกคนเข้ามาในระบบเว็บ
+*   **Action Items:**
+    *   [ ] สร้าง Telegram Bot และตั้งค่า Token
+    *   [ ] นำ Bot เข้าไปใน Group Chat ของทีมหลังบ้าน
+    *   [ ] เขียน API ให้ส่งข้อความแจ้งเตือนอัตโนมัติเมื่อแอดมินเปลี่ยนสถานะงาน (เช่น แจ้งทีมช่างเมื่อเปิดคิว, แจ้งจัดซื้อเมื่อคลิก "เช็คอะไหล่เสนอราคา") พร้อมส่งรูปภาพหน้างานไปให้ในแชทเลย
 
-**Acceptance Criteria:**
-- [ ] เปิด Web App URL แล้วไม่ error
-- [ ] Login ด้วยแอดมินได้
-- [ ] Department filtering ทำงาน
-
----
-
-### ขั้นที่ 4 — เพิ่ม Error Handling (Medium)
-
-**ปัญหา:** `updateStatus()` และ `deleteRequest()` ใน page.tsx ไม่มี try/catch
-
-**กรณีที่เกิดปัญหา:**
-- Google Sheets API ล้มเหลว → React state อัปเดตแต่ server ไม่อัปเดต → ข้อมูลผิดพลาด
-
-**วิธีแก้ `updateStatus`:**
-```ts
-const updateStatus = async (id: string, newStatus: Status) => {
-  const request = requests.find(r => r.id === id)
-  if (!request) return
-
-  const updatedRequest = { ...request, status: newStatus, history: [...] }
-
-  try {
-    if (isGoogleConfigured) {
-      const res = await fetch('/api/sheets', { method: 'PUT', ... })
-      if (!res.ok) throw new Error('API error')
-    }
-    setRequests(prev => prev.map(r => r.id === id ? updatedRequest : r))
-  } catch (error) {
-    console.error('Error updating status:', error)
-    alert('อัปเดตสถานะไม่สำเร็จ กรุณาลองใหม่')
-    // ไม่อัปเดต state ถ้า API ล้มเหลว
-  }
-}
-```
-
-**วิธีแก้ `deleteRequest`:**
-```ts
-const deleteRequest = async (id: string) => {
-  if (!confirm('ยืนยันการลบรายการนี้?')) return
-
-  try {
-    if (isGoogleConfigured) {
-      const res = await fetch(`/api/sheets?id=${id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error('API error')
-    }
-    setRequests(prev => prev.filter(r => r.id !== id))
-  } catch (error) {
-    console.error('Error deleting:', error)
-    alert('ลบไม่สำเร็จ กรุณาลองใหม่')
-  }
-}
-```
-
-**Acceptance Criteria:**
-- [ ] ถ้า API ล้มเหลว → แสดง alert และ state ไม่เปลี่ยน
-- [ ] ถ้า API สำเร็จ → state อัปเดต
+### 📌 Task 2.3: ระบบจัดการรูปภาพหน้างาน (Secure Storage)
+ย้ายออกจาก Google Drive เพื่อแก้ปัญหาโหลดรูปภาพช้าและ Rate Limit
+*   **Action Items:**
+    *   [ ] เปลี่ยนระบบอัปโหลดรูปภาพไปใช้ **Firebase Storage** (เพื่อให้เป็น Ecosystem เดียวกับ Task 2.1)
+    *   [ ] ใช้ระบบ **Signed URLs** ที่ลิงก์รูปภาพจะมีอายุใช้งานจำกัด (เช่น ดูได้แค่ 1 ชั่วโมง) เพื่อยกระดับความปลอดภัยข้อมูลลูกค้า
 
 ---
 
-### ขั้นที่ 5 — Commit ไฟล์ค้างทั้งหมด (Medium)
+## 📜 ข้อตกลงร่วมกันของทีมพัฒนา (Team Core Values)
+เพื่อป้องกันไม่ให้ระบบหลักพังระหว่างการอัปเกรด ทีมงานทุกคนต้องยึดถือหลักการดังนี้:
 
-**ปัจจุบัน (git status):**
-```
-M  download/google-apps-script/Code.gs
-M  download/google-apps-script/appsscript.json
-M  download/google-apps-script/js.html
-?? features.json
-```
-
-**แผน:**
-1. หลังจากแก้ Status mismatch (ขั้นที่ 1-2) เสร็จ → commit รวมกัน
-2. Commit 1: `feat: Fix status type mismatch across all layers`
-3. Commit 2: `feat: Add error handling for API calls`
-4. Commit 3: `chore: Track features.json and GAS updates`
-
-**Acceptance Criteria:**
-- [ ] `git status` สะอาด ไม่มีไฟล์ค้าง
-- [ ] Commit message สื่อความหมาย
-
----
-
-### ขั้นที่ 6 — แยก page.tsx ออกเป็น Components (Medium)
-
-**ปัญหา:** 893 บรรทัดใน 1 ไฟล์ ยาก maintain
-
-**โครงสร้างใหม่ที่แนะนำ:**
-```
-src/
-├── app/
-│   ├── page.tsx              # ← เหลือแค่ root state + orchestration (~150 บรรทัด)
-│   └── layout.tsx
-├── components/
-│   ├── LoginScreen.tsx       # หน้า login เลือกผู้ใช้ (~80 บรรทัด)
-│   ├── Header.tsx            # header + logout + storage indicator (~60 บรรทัด)
-│   ├── StatsBar.tsx          # 3 stat cards (~40 บรรทัด)
-│   ├── SearchBar.tsx         # search + filter + refresh (~50 บรรทัด)
-│   ├── JobList.tsx           # รายการงาน + loading/empty states (~60 บรรทัด)
-│   ├── JobCard.tsx           # card งาน 1 ชิ้น + buttons + history (~120 บรรทัด)
-│   └── JobModal.tsx          # modal form เพิ่ม/แก้ไขงาน (~200 บรรทัด)
-└── lib/
-    ├── STATUS_WORKFLOW.ts    # single source of truth ← ใช้จริง
-    ├── api.ts                # fetch wrappers (sheets API calls)
-    └── utils.ts
-```
-
-**Acceptance Criteria:**
-- [ ] ไม่มีไฟล์ไหนยาวเกิน 300 บรรทัด
-- [ ] `page.tsx` เป็นแค่ orchestrator
-- [ ] TypeScript compile ไม่มี error
-- [ ] UI ทำงานเหมือนเดิม
-
----
-
-### ขั้นที่ 7 — ทำให้ STATUS_WORKFLOW.ts ถูกใช้จริง (Minor)
-
-**ปัญหา:** มีโค้ดดี ๆ ใน `STATUS_WORKFLOW.ts` แต่ไม่มีใคร import
-
-**วิธีแก้ (ทำหลังจากขั้นที่ 6):**
-- ใน `page.tsx` (หรือ `JobCard.tsx` ใหม่) import และใช้:
-  ```ts
-  import { STATUS_CONFIG, getNextStatuses, canTransitionTo } from '@/lib/STATUS_WORKFLOW'
-  ```
-- ลบ `STATUS_CONFIG` local ที่ duplicate ออก
-- ลบ `STATUS_TRANSITIONS` local และใช้ `getNextStatuses()` แทน
-
-**Acceptance Criteria:**
-- [ ] ไม่มี Status config ซ้ำซ้อน
-- [ ] `STATUS_WORKFLOW.ts` เป็น single source of truth
-
----
-
-### ขั้นที่ 8 — อัปเดต Prisma Schema ให้ตรง Domain (Minor)
-
-**ปัญหา:** Schema มีแค่ `User` + `Post` generic ไม่ได้ใช้งานจริง
-
-**ปัจจุบัน (ไม่ตรง domain):**
-```prisma
-model User { id Int, email String, name String, posts Post[] }
-model Post { id Int, title String, content String, author User }
-```
-
-**แก้เป็น (ถ้าต้องการใช้ SQLite จริง):**
-```prisma
-model ServiceRequest {
-  id            String   @id @default(cuid())
-  requestNo     String   @unique
-  createdAt     DateTime @default(now())
-  channel       String
-  customerName  String
-  phone         String
-  address       String?
-  serviceType   String
-  description   String?
-  priority      String   @default("normal")
-  status        String   @default("new")
-  appointmentDate DateTime?
-  notes         String?
-  imageUrl      String?
-  history       Json     @default("[]")
-}
-
-model AppUser {
-  id         String @id
-  name       String
-  department String
-}
-```
-
-**หมายเหตุ:** ถ้าใช้ Google Sheets เป็น primary database ตลอด ขั้นนี้ไม่จำเป็นเร่งด่วน
-
-**Acceptance Criteria:**
-- [ ] Schema ตรงกับ domain model จริง
-- [ ] `npx prisma db push` ไม่มี error
-
----
-
-## ลำดับความสำคัญ (TL;DR)
-
-```
-ขั้นที่ 1: Fix Status Mismatch      ← ทำก่อนสุด (Critical, unblocks ทุกอย่าง)
-ขั้นที่ 2: Fix Department Filtering  ← ทำพร้อมกับขั้นที่ 1
-ขั้นที่ 3: Deploy GAS Manual        ← ทำหลังขั้นที่ 1-2 (ต้องทำ manual)
-ขั้นที่ 4: Add Error Handling       ← ทำหลังขั้นที่ 3
-ขั้นที่ 5: Commit ทุกอย่าง         ← ทำหลังขั้นที่ 1-4
-ขั้นที่ 6: Split page.tsx           ← ทำเมื่อมีเวลา
-ขั้นที่ 7: Use STATUS_WORKFLOW.ts   ← ทำพร้อมกับขั้นที่ 6
-ขั้นที่ 8: Fix Prisma Schema        ← ทำสุดท้าย (ไม่เร่งด่วน)
-```
-
----
-
-## สถานะการทดสอบหลังแก้ไข
-
-หลังทำขั้นที่ 1-3 เสร็จ ให้ทดสอบตาม features.json Phase 2:
-
-- [ ] **feature-2-1**: Department filtering ทำงาน (deploy GAS แล้ว)
-- [ ] **feature-2-2**: Login ด้วยแอดมิน → เห็นหน้าหลัก
-- [ ] **feature-2-3**: สร้างงานใหม่ → บันทึกลง Google Sheets
-- [ ] **feature-2-4**: เปลี่ยนสถานะงาน → ประวัติอัปเดต
-- [ ] **feature-2-5**: Login ต่างฝ่าย → เห็นงานตาม department
-- [ ] **feature-2-6**: Google Sheets Sync → ข้อมูลถูกต้อง
-
----
-
-*อัปเดต PLAN.md นี้เมื่อแต่ละขั้นเสร็จ*
+1.  **Don't Break the Fallback (ห้ามทิ้งออฟไลน์):** ห้ามแตะต้องหรือลบโค้ดระบบสำรอง `localStorage` โดยเด็ดขาด เพราะนี่คือระบบช่วยชีวิตเมื่อช่างหน้างานไม่มีสัญญาณอินเทอร์เน็ต
+2.  **Data Flows One Way (ซอร์สโค้ดคือพระเจ้า):** การแก้ไขข้อมูลทุกอย่างต้องทำผ่านเว็บแอปพลิเคชัน (UI) หรือ API เท่านั้น ห้ามแอดมินแอบเข้าไปคีย์ข้อมูลแก้ในตาราง Google Sheets โดยตรง เพราะจะทำให้ระบบ History รวน
+3.  **K.I.S.S (Keep It Simple, Stupid):** ไม่ต้องใช้ Library ซับซ้อนหรือเขียนท่ายาก เน้นฟังก์ชันที่เสถียร โหลดเร็ว และเข้าใจง่าย
+4.  **Test on Cheap Phones (ทดสอบแบบคนหน้างาน):** ก่อนนำโค้ดขึ้นระบบจริง (Production) ต้องทดสอบจำลองเครือข่ายโหลดช้า (Slow 3G) หรือเปิดบนมือถือสเปคต่ำเสมอ ถ้าโหลดผ่าน = ใช้งานจริงได้

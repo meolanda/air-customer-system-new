@@ -1,15 +1,15 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
-
+import { useState, useEffect, useMemo } from 'react'
+import { ref, onValue, set, update, remove } from 'firebase/database'
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
+import { db, storage } from '../lib/firebase'
 // Types
-type Department = 'admin' | 'quotation' | 'procurement'
 type Status = 'new' | 'queue' | 'waiting_quote' | 'checking_parts' | 'send_quote' | 'waiting_response' | 'completed' | 'cancelled'
 
 interface User {
   id: string
   name: string
-  department: Department
 }
 
 interface ServiceRequest {
@@ -30,38 +30,30 @@ interface ServiceRequest {
   history: { status: Status; date: string; by: string }[]
 }
 
-// Department config
-const DEPARTMENTS: Record<Department, { name: string; icon: string; color: string }> = {
-  admin: { name: 'ฝ่ายแอดมิน', icon: '👤', color: 'bg-blue-500' },
-  quotation: { name: 'ฝ่ายทำใบเสนอราคา', icon: '📄', color: 'bg-green-500' },
-  procurement: { name: 'ฝ่ายจัดซื้อ', icon: '🛒', color: 'bg-orange-500' }
-}
-
-// Status config - aligned with STATUS_WORKFLOW.ts
-const STATUS_CONFIG: Record<Status, { label: string; icon: string; color: string; nextDepartment?: Department }> = {
-  new: { label: 'รับเรื่องใหม่', icon: '📥', color: 'bg-slate-500', nextDepartment: undefined },
-  queue: { label: 'จองคิว / นัดหมาย', icon: '📋', color: 'bg-yellow-500', nextDepartment: 'admin' },
-  waiting_quote: { label: 'ขอใบเสนอราคา', icon: '💰', color: 'bg-orange-500', nextDepartment: 'quotation' },
-  checking_parts: { label: 'เช็คอะไหล่ + เสนอราคา', icon: '🔧', color: 'bg-indigo-500', nextDepartment: 'procurement' },
-  send_quote: { label: 'ส่งใบเสนอราคาแล้ว', icon: '📨', color: 'bg-teal-500', nextDepartment: 'admin' },
-  waiting_response: { label: 'รอลูกค้าตอบกลับ', icon: '⏳', color: 'bg-amber-500', nextDepartment: 'admin' },
-  completed: { label: 'เสร็จสิ้น', icon: '🏁', color: 'bg-gray-500', nextDepartment: undefined },
-  cancelled: { label: 'ยกเลิก', icon: '❌', color: 'bg-red-500', nextDepartment: undefined }
-}
-
-// Sample users for login
+// Real employee list (name only, no department)
 const USERS: User[] = [
-  { id: 'admin1', name: 'คุณสมชาย', department: 'admin' },
-  { id: 'admin2', name: 'คุณสมหญิง', department: 'admin' },
-  { id: 'admin3', name: 'คุณสมศักดิ์', department: 'admin' },
-  { id: 'admin4', name: 'คุณสมศรี', department: 'admin' },
-  { id: 'admin5', name: 'คุณสมบูรณ์', department: 'admin' },
-  { id: 'admin6', name: 'คุณสมปอง', department: 'admin' },
-  { id: 'quote1', name: 'คุณใบเสนอ', department: 'quotation' },
-  { id: 'procure1', name: 'คุณจัดซื้อ', department: 'procurement' }
+  { id: 'u1', name: 'คุณเนย' },
+  { id: 'u2', name: 'คุณฟิล์ม' },
+  { id: 'u3', name: 'คุณตุ้ม' },
+  { id: 'u4', name: 'คุณดอย' },
+  { id: 'u5', name: 'คุณดอจ' },
+  { id: 'u6', name: 'คุณออมสิน' },
+  { id: 'u7', name: 'คุณเผือก' }
 ]
 
-// Status transitions - aligned with STATUS_WORKFLOW.ts
+// Status config
+const STATUS_CONFIG: Record<Status, { label: string; icon: string; color: string }> = {
+  new: { label: 'รับเรื่องใหม่', icon: '📥', color: 'bg-slate-500' },
+  queue: { label: 'จองคิว / นัดหมาย', icon: '📋', color: 'bg-yellow-500' },
+  waiting_quote: { label: 'ขอใบเสนอราคา', icon: '💰', color: 'bg-orange-500' },
+  checking_parts: { label: 'เช็คอะไหล่ + เสนอราคา', icon: '🔧', color: 'bg-indigo-500' },
+  send_quote: { label: 'ส่งใบเสนอราคาแล้ว', icon: '📨', color: 'bg-teal-500' },
+  waiting_response: { label: 'รอลูกค้าตอบกลับ', icon: '⏳', color: 'bg-amber-500' },
+  completed: { label: 'เสร็จสิ้น', icon: '🏁', color: 'bg-gray-500' },
+  cancelled: { label: 'ยกเลิก', icon: '❌', color: 'bg-red-500' }
+}
+
+// Status transitions
 const STATUS_TRANSITIONS: Record<Status, Status[]> = {
   new: ['queue', 'waiting_quote', 'checking_parts', 'cancelled'],
   queue: ['completed', 'cancelled'],
@@ -73,15 +65,9 @@ const STATUS_TRANSITIONS: Record<Status, Status[]> = {
   cancelled: []
 }
 
-// Which department handles which status - aligned with STATUS_WORKFLOW.ts
-const STATUS_BY_DEPARTMENT: Record<Department, Status[]> = {
-  admin: ['new', 'queue', 'send_quote', 'waiting_response', 'completed', 'cancelled'],
-  quotation: ['waiting_quote'],
-  procurement: ['checking_parts']
-}
-
 export default function Home() {
   const [user, setUser] = useState<User | null>(null)
+  const [newNameInput, setNewNameInput] = useState('')
   const [requests, setRequests] = useState<ServiceRequest[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -90,6 +76,25 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [viewMode, setViewMode] = useState<'card' | 'table'>('card')
+
+  // AI State
+  const [isAiLoading, setIsAiLoading] = useState(false)
+  const [aiText, setAiText] = useState('')
+  const [activeAiTab, setActiveAiTab] = useState<'text' | 'image' | 'voice' | null>(null)
+
+  // AI Image State
+  const [aiImageBase64, setAiImageBase64] = useState<string>('')
+
+  // AI Voice State
+  const [isRecording, setIsRecording] = useState(false)
+  const [voiceTranscript, setVoiceTranscript] = useState('')
+  const [recognitionRef, setRecognitionRef] = useState<any>(null)
+
+  // Auth State (PIN)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [pinInput, setPinInput] = useState('')
+  const [pinError, setPinError] = useState('')
 
   // Form state
   const [formData, setFormData] = useState<Partial<ServiceRequest>>({
@@ -106,58 +111,39 @@ export default function Home() {
     imageUrl: ''
   })
 
-  // Check if Google Sheets is configured
-  const [isGoogleConfigured, setIsGoogleConfigured] = useState(false)
-
-  // Load user from localStorage
+  // Load user and auth state from storage
   useEffect(() => {
     const savedUser = localStorage.getItem('currentUser')
     if (savedUser) setUser(JSON.parse(savedUser))
+
+    const savedAuth = sessionStorage.getItem('isAuthenticated')
+    if (savedAuth === 'true') setIsAuthenticated(true)
   }, [])
 
-  // Fetch data from API
-  const fetchData = useCallback(async () => {
+  // Sync data from Firebase
+  useEffect(() => {
+    if (!user) return
+
     setIsLoading(true)
-    try {
-      const response = await fetch('/api/sheets')
-      const result = await response.json()
-
-      if (result.data) {
-        setRequests(result.data)
-        setIsGoogleConfigured(true)
+    const requestsRef = ref(db, 'serviceRequests')
+    const unsubscribe = onValue(requestsRef, (snapshot) => {
+      const data = snapshot.val()
+      if (data) {
+        // Convert object to array and sort by createdAt descending
+        const requestsArray = Object.values(data) as ServiceRequest[]
+        requestsArray.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        setRequests(requestsArray)
       } else {
-        // Fallback to localStorage if Google Sheets not configured
-        const savedRequests = localStorage.getItem('serviceRequests')
-        if (savedRequests) {
-          setRequests(JSON.parse(savedRequests))
-        }
-        setIsGoogleConfigured(false)
+        setRequests([])
       }
-    } catch (error) {
-      console.error('Error fetching data:', error)
-      // Fallback to localStorage
-      const savedRequests = localStorage.getItem('serviceRequests')
-      if (savedRequests) {
-        setRequests(JSON.parse(savedRequests))
-      }
-      setIsGoogleConfigured(false)
-    } finally {
       setIsLoading(false)
-    }
-  }, [])
+    }, (error) => {
+      console.error('Firebase read failed:', error)
+      setIsLoading(false)
+    })
 
-  useEffect(() => {
-    if (user) {
-      fetchData()
-    }
-  }, [user, fetchData])
-
-  // Save to localStorage as backup
-  useEffect(() => {
-    if (requests.length > 0) {
-      localStorage.setItem('serviceRequests', JSON.stringify(requests))
-    }
-  }, [requests])
+    return () => unsubscribe()
+  }, [user])
 
   // Login
   const handleLogin = (selectedUser: User) => {
@@ -169,6 +155,21 @@ export default function Home() {
   const handleLogout = () => {
     setUser(null)
     localStorage.removeItem('currentUser')
+    setIsAuthenticated(false)
+    sessionStorage.removeItem('isAuthenticated')
+  }
+
+  // Handle PIN verification
+  const handlePinSubmit = () => {
+    const correctPin = process.env['NEXT_PUBLIC_STORE_PIN'] || '123456'
+    if (pinInput === correctPin) {
+      setIsAuthenticated(true)
+      sessionStorage.setItem('isAuthenticated', 'true')
+      setPinError('')
+    } else {
+      setPinError('รหัส PIN ไม่ถูกต้อง')
+      setPinInput('')
+    }
   }
 
   // Generate request number
@@ -179,44 +180,51 @@ export default function Home() {
     return `REQ-${dateStr}-${count.toString().padStart(3, '0')}`
   }
 
-  // Upload image to Google Drive
+  // Upload image to Firebase Storage
   const uploadImage = async (file: File): Promise<string | null> => {
     try {
       setUploadProgress(0)
-      const formDataUpload = new FormData()
-      formDataUpload.append('file', file)
+      const timestamp = Date.now()
+      const fileName = `${timestamp}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
+      const fileRef = storageRef(storage, `job_images/${fileName}`)
 
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        body: formDataUpload,
+      const uploadTask = uploadBytesResumable(fileRef, file)
+
+      return new Promise((resolve, reject) => {
+        uploadTask.on(
+          'state_changed',
+          (snapshot) => {
+            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100
+            setUploadProgress(Math.round(progress))
+          },
+          (error) => {
+            console.error('Error uploading image to Firebase:', error)
+            reject(null)
+          },
+          async () => {
+            try {
+              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref)
+              resolve(downloadURL)
+            } catch (err) {
+              console.error('Error getting download URL:', err)
+              resolve(null)
+            } finally {
+              setTimeout(() => setUploadProgress(null), 1000)
+            }
+          }
+        )
       })
-
-      const result = await response.json()
-      setUploadProgress(100)
-
-      if (result.success && result.data?.url) {
-        return result.data.url
-      }
-      return null
     } catch (error) {
-      console.error('Error uploading image:', error)
+      console.error('Error starting upload:', error)
       return null
-    } finally {
-      setTimeout(() => setUploadProgress(null), 1000)
     }
   }
 
-  // Filter requests by department
+  // Filter requests (no department filtering - everyone sees all)
   const departmentRequests = useMemo(() => {
     if (!user) return []
 
     let filtered = requests
-
-    // Filter by department
-    if (user.department !== 'admin') {
-      const allowedStatuses = STATUS_BY_DEPARTMENT[user.department]
-      filtered = filtered.filter(r => allowedStatuses.includes(r.status))
-    }
 
     // Search
     if (searchTerm) {
@@ -238,25 +246,18 @@ export default function Home() {
   // Stats for dashboard
   const stats = useMemo(() => {
     if (!user) return { total: 0, todo: 0, done: 0 }
-
-    const allowedStatuses = STATUS_BY_DEPARTMENT[user.department]
-    const deptRequests = user.department === 'admin'
-      ? requests
-      : requests.filter(r => allowedStatuses.includes(r.status))
-
     const todoStatuses = ['new', 'queue', 'waiting_quote', 'checking_parts', 'send_quote', 'waiting_response']
-
     return {
-      total: deptRequests.length,
-      todo: deptRequests.filter(r => todoStatuses.includes(r.status)).length,
-      done: deptRequests.filter(r => r.status === 'completed').length
+      total: requests.length,
+      todo: requests.filter(r => todoStatuses.includes(r.status)).length,
+      done: requests.filter(r => r.status === 'completed').length
     }
   }, [requests, user])
 
   // Handle form
   const handleSubmit = async () => {
-    if (!formData.customerName || !formData.phone) {
-      alert('กรุณากรอกชื่อลูกค้าและเบอร์โทร')
+    if (!formData.customerName || !formData.phone || !formData.address) {
+      alert('กรุณากรอกชื่อลูกค้า, เบอร์โทร และที่อยู่ (เป็นช่องบังคับ)')
       return
     }
 
@@ -277,17 +278,8 @@ export default function Home() {
             : editingRequest.history
         } as ServiceRequest
 
-        // Try API first
-        if (isGoogleConfigured) {
-          const res = await fetch('/api/sheets', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updatedRequest)
-          })
-          if (!res.ok) throw new Error('API error')
-        }
-
-        setRequests(prev => prev.map(r => r.id === editingRequest.id ? updatedRequest : r))
+        // Save to Firebase (state will update automatically via onValue)
+        await set(ref(db, `serviceRequests/${updatedRequest.id}`), updatedRequest)
       } else {
         // Create
         const newRequest: ServiceRequest = {
@@ -308,17 +300,8 @@ export default function Home() {
           history: [{ status: 'new', date: new Date().toISOString(), by: user?.name || 'System' }]
         }
 
-        // Try API first
-        if (isGoogleConfigured) {
-          const res = await fetch('/api/sheets', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newRequest)
-          })
-          if (!res.ok) throw new Error('API error')
-        }
-
-        setRequests(prev => [newRequest, ...prev])
+        // Save to Firebase (state will update automatically via onValue)
+        await set(ref(db, `serviceRequests/${newRequest.id}`), newRequest)
       }
       closeModal()
     } catch (error) {
@@ -369,15 +352,7 @@ export default function Home() {
     }
 
     try {
-      if (isGoogleConfigured) {
-        const res = await fetch('/api/sheets', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updatedRequest)
-        })
-        if (!res.ok) throw new Error('API error')
-      }
-      setRequests(prev => prev.map(r => r.id === id ? updatedRequest : r))
+      await update(ref(db, `serviceRequests/${id}`), updatedRequest)
     } catch (error) {
       console.error('Error updating status:', error)
       alert('อัปเดตสถานะไม่สำเร็จ กรุณาลองใหม่')
@@ -388,11 +363,7 @@ export default function Home() {
     if (!confirm('ยืนยันการลบรายการนี้?')) return
 
     try {
-      if (isGoogleConfigured) {
-        const res = await fetch(`/api/sheets?id=${id}`, { method: 'DELETE' })
-        if (!res.ok) throw new Error('API error')
-      }
-      setRequests(prev => prev.filter(r => r.id !== id))
+      await remove(ref(db, `serviceRequests/${id}`))
     } catch (error) {
       console.error('Error deleting:', error)
       alert('ลบไม่สำเร็จ กรุณาลองใหม่')
@@ -422,7 +393,216 @@ export default function Home() {
     }
   }
 
-  // === LOGIN SCREEN ===
+  // AI Analysis Handle
+  const handleAiAnalyze = async () => {
+    if (!aiText.trim()) return
+
+    setIsAiLoading(true)
+    try {
+      const response = await fetch('/api/ai/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: aiText })
+      })
+
+      const result = await response.json()
+
+      if (result.success && result.data) {
+        setFormData(prev => ({
+          ...prev,
+          customerName: result.data.customerName || prev.customerName,
+          phone: result.data.phone || prev.phone,
+          address: result.data.address || prev.address,
+          serviceType: result.data.serviceType || prev.serviceType,
+          priority: result.data.priority || prev.priority,
+          description: result.data.description || prev.description
+        }))
+        setAiText('')
+        setActiveAiTab(null) // Close the AI panel after success
+      } else {
+        alert('AI วิเคราะห์ไม่สำเร็จ: ' + (result.error || 'เกิดข้อผิดพลาดบางอย่าง'))
+      }
+    } catch (error) {
+      console.error('Error analyzing text:', error)
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อกับ AI')
+    } finally {
+      setIsAiLoading(false)
+    }
+  }
+
+  // AI Image Analysis Handle
+  const handleAiImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      if (ev.target?.result) {
+        setAiImageBase64(ev.target.result as string)
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleAiImageAnalyze = async () => {
+    if (!aiImageBase64) return
+
+    setIsAiLoading(true)
+    try {
+      const response = await fetch('/api/ai/analyze-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: aiImageBase64 })
+      })
+
+      const result = await response.json()
+
+      if (result.success && result.data) {
+        setFormData(prev => ({
+          ...prev,
+          customerName: result.data.customerName || prev.customerName,
+          phone: result.data.phone || prev.phone,
+          address: result.data.address || prev.address,
+          serviceType: result.data.serviceType || prev.serviceType,
+          description: result.data.description || prev.description
+        }))
+        setAiImageBase64('')
+        setActiveAiTab(null) // Close the AI panel after success
+      } else {
+        alert('AI วิเคราะห์รูปภาพไม่สำเร็จ: ' + (result.error || 'เกิดข้อผิดพลาดบางอย่าง'))
+      }
+    } catch (error) {
+      console.error('Error analyzing image:', error)
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อกับ AI')
+    } finally {
+      setIsAiLoading(false)
+    }
+  }
+
+  // AI Voice Logic
+  const toggleVoiceRecording = () => {
+    if (isRecording) {
+      if (recognitionRef) {
+        recognitionRef.stop()
+      }
+      return
+    }
+
+     
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SR) {
+      alert('บราวเซอร์นี้ไม่รองรับการรับเสียง กรุณาใช้ Chrome บน PC หรือ Android')
+      return
+    }
+
+    setVoiceTranscript('')
+    const recognition = new SR()
+    recognition.lang = 'th-TH'
+    recognition.continuous = true
+    recognition.interimResults = true
+
+     
+    recognition.onresult = (e: any) => {
+      let t = ''
+      for (let i = 0; i < e.results.length; i++) {
+        t += e.results[i][0].transcript
+      }
+      setVoiceTranscript(t)
+    }
+
+    recognition.onend = () => {
+      setIsRecording(false)
+      setRecognitionRef(null)
+    }
+
+    recognition.onerror = () => {
+      setIsRecording(false)
+      setRecognitionRef(null)
+    }
+
+    recognition.start()
+    setIsRecording(true)
+    setRecognitionRef(recognition)
+  }
+
+  const handleAiVoiceAnalyze = async () => {
+    if (!voiceTranscript.trim()) return
+
+    setIsAiLoading(true)
+    try {
+      const response = await fetch('/api/ai/analyze', {
+        method: 'POST', // Re-use the text analysis route for voice transcript
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: voiceTranscript })
+      })
+
+      const result = await response.json()
+
+      if (result.success && result.data) {
+        setFormData(prev => ({
+          ...prev,
+          customerName: result.data.customerName || prev.customerName,
+          phone: result.data.phone || prev.phone,
+          address: result.data.address || prev.address,
+          serviceType: result.data.serviceType || prev.serviceType,
+          priority: result.data.priority || prev.priority,
+          description: result.data.description || prev.description
+        }))
+        setVoiceTranscript('')
+        setActiveAiTab(null) // Close the AI panel after success
+      } else {
+        alert('AI วิเคราะห์เสียงไม่สำเร็จ: ' + (result.error || 'เกิดข้อผิดพลาดบางอย่าง'))
+      }
+    } catch (error) {
+      console.error('Error analyzing voice:', error)
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อกับ AI')
+    } finally {
+      setIsAiLoading(false)
+    }
+  }
+
+  // === AUTH SCREEN (PIN) ===
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm">
+          <div className="text-center mb-8">
+            <div className="w-20 h-20 bg-blue-500 rounded-2xl flex items-center justify-center text-4xl mx-auto mb-4 shadow-lg">
+              🔒
+            </div>
+            <h1 className="text-2xl font-bold text-slate-800">ระบบภายในร้าน</h1>
+            <p className="text-slate-500 mt-2">กรุณาใส่รหัส PIN เพื่อเข้าใช้งาน</p>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <input
+                type="password"
+                placeholder="กรอกรหัส PIN 6 หลัก"
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handlePinSubmit()
+                }}
+                className={`w-full px-4 py-3 border-2 rounded-xl text-center text-xl tracking-widest focus:ring-2 focus:ring-blue-500 outline-none ${pinError ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-200 bg-slate-50'}`}
+                maxLength={6}
+                inputMode="numeric"
+              />
+              {pinError && <p className="text-red-500 text-sm text-center mt-2">{pinError}</p>}
+            </div>
+            <button
+              onClick={handlePinSubmit}
+              className="w-full bg-blue-500 hover:bg-blue-600 text-white px-5 py-3 rounded-xl font-semibold transition-all"
+            >
+              เข้าสู่ระบบ
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // === LOGIN SCREEN (USER SELECTION) ===
   if (!user) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -432,49 +612,48 @@ export default function Home() {
               ❄️
             </div>
             <h1 className="text-2xl font-bold text-slate-800">ระบบรับงานบริการแอร์</h1>
-            <p className="text-slate-500 mt-2">เลือกผู้ใช้เพื่อเข้าสู่ระบบ</p>
+            <p className="text-slate-500 mt-2">เลือกชื่อเพื่อเข้าสู่ระบบ</p>
           </div>
 
           <div className="space-y-3">
-            <div className="bg-blue-50 rounded-xl p-3">
-              <p className="text-sm font-medium text-blue-700 mb-2">👤 ฝ่ายแอดมิน (6 คน)</p>
-              <div className="grid grid-cols-2 gap-2">
-                {USERS.filter(u => u.department === 'admin').map(u => (
-                  <button
-                    key={u.id}
-                    onClick={() => handleLogin(u)}
-                    className="bg-white hover:bg-blue-100 text-slate-700 px-4 py-3 rounded-xl text-sm font-medium transition-all border border-blue-200"
-                  >
-                    {u.name}
-                  </button>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">ชื่อของคุณ</label>
+              <select
+                onChange={(e) => {
+                  const u = USERS.find(u => u.id === e.target.value)
+                  if (u) { handleLogin(u); }
+                }}
+                defaultValue=""
+                className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl text-sm bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none mb-3"
+              >
+                <option value="">— เลือกชื่อ —</option>
+                {USERS.map(u => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
                 ))}
+              </select>
+              <p className="text-xs text-slate-400 text-center mb-2">―― หรือถ้าไม่มีชื่อ ――</p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="กรอกชื่อใหม่ เช่น คุณสมชาย"
+                  value={newNameInput}
+                  onChange={(e) => setNewNameInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newNameInput.trim()) {
+                      handleLogin({ id: 'temp_' + Date.now(), name: newNameInput.trim() })
+                    }
+                  }}
+                  className="flex-1 px-4 py-3 border-2 border-slate-200 rounded-xl text-sm bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+                <button
+                  onClick={() => {
+                    if (newNameInput.trim()) handleLogin({ id: 'temp_' + Date.now(), name: newNameInput.trim() })
+                  }}
+                  className="bg-blue-500 hover:bg-blue-600 text-white px-5 py-3 rounded-xl text-sm font-semibold transition-all"
+                >
+                  เข้า
+                </button>
               </div>
-            </div>
-
-            <div className="bg-green-50 rounded-xl p-3">
-              <p className="text-sm font-medium text-green-700 mb-2">📄 ฝ่ายทำใบเสนอราคา (1 คน)</p>
-              {USERS.filter(u => u.department === 'quotation').map(u => (
-                <button
-                  key={u.id}
-                  onClick={() => handleLogin(u)}
-                  className="w-full bg-white hover:bg-green-100 text-slate-700 px-4 py-3 rounded-xl text-sm font-medium transition-all border border-green-200"
-                >
-                  {u.name}
-                </button>
-              ))}
-            </div>
-
-            <div className="bg-orange-50 rounded-xl p-3">
-              <p className="text-sm font-medium text-orange-700 mb-2">🛒 ฝ่ายจัดซื้อ (1 คน)</p>
-              {USERS.filter(u => u.department === 'procurement').map(u => (
-                <button
-                  key={u.id}
-                  onClick={() => handleLogin(u)}
-                  className="w-full bg-white hover:bg-orange-100 text-slate-700 px-4 py-3 rounded-xl text-sm font-medium transition-all border border-orange-200"
-                >
-                  {u.name}
-                </button>
-              ))}
             </div>
           </div>
         </div>
@@ -495,24 +674,17 @@ export default function Home() {
               </div>
               <div>
                 <h1 className="text-lg font-bold text-slate-800">ระบบรับงานบริการแอร์</h1>
-                <p className="text-xs text-slate-500">
-                  {DEPARTMENTS[user.department].icon} {user.name} • {DEPARTMENTS[user.department].name}
-                </p>
+                <p className="text-xs text-slate-500">👤 {user.name}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {/* Storage indicator */}
-              <div className={`px-2 py-1 rounded-lg text-xs font-medium ${isGoogleConfigured ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                {isGoogleConfigured ? '☁️ Google Sheets' : '💾 Local Storage'}
-              </div>
-              {user.department === 'admin' && (
-                <button
-                  onClick={() => openModal()}
-                  className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-1"
-                >
-                  <span>+</span> เพิ่มงาน
-                </button>
-              )}
+              {/* Storage indicator - Removed as Firebase handles it */}
+              <button
+                onClick={() => openModal()}
+                className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-1"
+              >
+                <span>+</span> เพิ่มงาน
+              </button>
               <button
                 onClick={handleLogout}
                 className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-xl text-sm"
@@ -543,8 +715,8 @@ export default function Home() {
 
         {/* Search */}
         <div className="bg-white rounded-2xl p-3 shadow-sm border border-slate-200">
-          <div className="flex gap-2">
-            <div className="flex-1 relative">
+          <div className="flex gap-2 flex-wrap sm:flex-nowrap">
+            <div className="flex-1 relative min-w-[200px]">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
               <input
                 type="text"
@@ -564,13 +736,22 @@ export default function Home() {
                 <option key={key} value={key}>{config.icon} {config.label}</option>
               ))}
             </select>
-            <button
-              onClick={fetchData}
-              className="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-50 hover:bg-slate-100"
-              title="รีเฟรชข้อมูล"
-            >
-              🔄
-            </button>
+            <div className="hidden sm:flex bg-slate-100 p-1 rounded-xl">
+              <button
+                onClick={() => setViewMode('card')}
+                className={`px-3 py-1 text-sm rounded-lg font-medium transition-all ${viewMode === 'card' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                title="Card View"
+              >
+                📱 โมบาย
+              </button>
+              <button
+                onClick={() => setViewMode('table')}
+                className={`px-3 py-1 text-sm rounded-lg font-medium transition-all ${viewMode === 'table' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                title="Table View"
+              >
+                💻 ตาราง
+              </button>
+            </div>
           </div>
         </div>
 
@@ -585,8 +766,89 @@ export default function Home() {
             <div className="text-5xl mb-3">📭</div>
             <p className="text-slate-500">ไม่มีงานที่ต้องดำเนินการ</p>
           </div>
+        ) : viewMode === 'table' ? (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hidden sm:block">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-sm font-semibold text-slate-600">
+                    <th className="px-4 py-3 whitespace-nowrap">เลขที่งาน / วันที่</th>
+                    <th className="px-4 py-3 whitespace-nowrap">ลูกค้า</th>
+                    <th className="px-4 py-3 whitespace-nowrap">ประเภทงาน</th>
+                    <th className="px-4 py-3 whitespace-nowrap">สถานะปัจจุบัน</th>
+                    <th className="px-4 py-3 whitespace-nowrap text-right">จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {departmentRequests.map((request) => (
+                    <tr key={request.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-4 py-3 align-top">
+                        <div className="font-mono text-sm text-blue-600">{request.requestNo}</div>
+                        <div className="text-xs text-slate-500">{formatDate(request.createdAt)}</div>
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <div className="font-medium text-slate-800 text-sm whitespace-nowrap">{request.customerName}</div>
+                        <div className="text-xs text-slate-500">{request.phone}</div>
+                        {request.address && <div className="text-xs text-slate-400 mt-1 truncate max-w-[200px]" title={request.address}>📍 {request.address}</div>}
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="bg-slate-100 px-2 py-0.5 rounded text-xs text-slate-600 whitespace-nowrap">{request.serviceType}</span>
+                          <span className="text-xs text-slate-500">ผ่าน {request.channel}</span>
+                        </div>
+                        {request.priority !== 'normal' && (
+                          <div className={`mt-1.5 px-2 py-0.5 rounded text-[10px] inline-block font-medium ${request.priority === 'urgent' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                            {request.priority === 'urgent' ? '🟡 เร่งด่วน' : '🔴 ฉุกเฉิน'}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 align-top whitespace-nowrap">
+                        <span className={`px-2 py-1 rounded-lg text-xs font-medium text-white ${STATUS_CONFIG[request.status].color}`}>
+                          {STATUS_CONFIG[request.status].icon} {STATUS_CONFIG[request.status].label}
+                        </span>
+                        {/* Quick Status Change */}
+                        {STATUS_TRANSITIONS[request.status].length > 0 && (
+                          <div className="mt-2 text-[10px] text-slate-400">เปลี่ยนเป็น:</div>
+                        )}
+                        <div className="mt-1 flex flex-wrap gap-1 max-w-[200px]">
+                          {STATUS_TRANSITIONS[request.status].map((nextStatus) => (
+                            <button
+                              key={nextStatus}
+                              onClick={() => updateStatus(request.id, nextStatus)}
+                              className={`px-1.5 py-0.5 rounded border text-[10px] font-medium transition-all ${STATUS_CONFIG[nextStatus].color.replace('bg-', 'text-').replace('500', '600')} bg-white hover:bg-slate-50`}
+                              title={STATUS_CONFIG[nextStatus].label}
+                            >
+                              {STATUS_CONFIG[nextStatus].icon}
+                            </button>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 align-top text-right whitespace-nowrap">
+                        <div className="flex justify-end gap-1.5">
+                          <button
+                            onClick={() => openModal(request)}
+                            className="p-1.5 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                            title="แก้ไข"
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            onClick={() => deleteRequest(request.id)}
+                            className="p-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+                            title="ลบ"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3 sm:hidden sm:grid sm:grid-cols-2 sm:gap-4 sm:space-y-0 lg:grid-cols-3">
             {departmentRequests.map((request) => (
               <div key={request.id} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200">
                 <div className="flex items-start justify-between mb-2">
@@ -697,6 +959,176 @@ export default function Home() {
             </div>
 
             <div className="p-4 space-y-3">
+              {/* AI Smart Paste */}
+              <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl p-3 border border-indigo-100">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2 text-indigo-700 font-medium text-sm">
+                    <span>✨</span>
+                    <span>AI ช่วยเติมข้อมูล</span>
+                  </div>
+                  {activeAiTab && (
+                    <button
+                      onClick={() => {
+                        setActiveAiTab(null)
+                        setAiText('')
+                      }}
+                      className="text-slate-400 hover:text-slate-600 text-xs"
+                    >
+                      ✕ ปิด
+                    </button>
+                  )}
+                </div>
+
+                {!activeAiTab ? (
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => setActiveAiTab('text')}
+                      className="bg-white hover:bg-indigo-50 text-indigo-600 py-2 rounded-lg text-xs font-medium border border-indigo-100 transition-colors flex flex-col items-center gap-1"
+                    >
+                      <span className="text-lg">📋</span>
+                      วางข้อความ
+                    </button>
+                    <button
+                      onClick={() => setActiveAiTab('image')}
+                      className="bg-white hover:bg-indigo-50 text-indigo-600 py-2 rounded-lg text-xs font-medium border border-indigo-100 transition-colors flex flex-col items-center gap-1"
+                    >
+                      <span className="text-lg">🖼️</span>
+                      สแกนรูปภาพ
+                    </button>
+                    <button
+                      onClick={() => setActiveAiTab('voice')}
+                      className="bg-white hover:bg-indigo-50 text-indigo-600 py-2 rounded-lg text-xs font-medium border border-indigo-100 transition-colors flex flex-col items-center gap-1"
+                    >
+                      <span className="text-lg">🎙️</span>
+                      พูดสั่งงาน
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-lg p-2 border border-indigo-100">
+                    {activeAiTab === 'text' && (
+                      <div className="space-y-2">
+                        <textarea
+                          placeholder="วางข้อความแชทลูกค้า, ข้อมูลงาน หรือที่อยู่ตรงนี้..."
+                          value={aiText}
+                          onChange={(e) => setAiText(e.target.value)}
+                          className="w-full text-sm p-2 bg-slate-50 border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-1 focus:ring-indigo-500 min-h-[80px]"
+                        />
+                        <button
+                          onClick={handleAiAnalyze}
+                          disabled={!aiText.trim() || isAiLoading}
+                          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {isAiLoading ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                              กำลังวิเคราะห์...
+                            </>
+                          ) : (
+                            '🚀 วิเคราะห์ข้อมูล'
+                          )}
+                        </button>
+                      </div>
+                    )}
+                    {activeAiTab === 'image' && (
+                      <div className="space-y-2">
+                        {aiImageBase64 ? (
+                          <div className="relative">
+                            <img
+                              src={aiImageBase64}
+                              alt="Image to scan"
+                              className="w-full max-h-48 rounded-xl border border-slate-200 object-contain bg-slate-50"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setAiImageBase64('')}
+                              className="absolute top-2 right-2 bg-slate-800/50 text-white p-1 rounded-full text-xs hover:bg-red-500 transition-colors"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="border-2 border-dashed border-indigo-200 rounded-xl p-4 text-center bg-indigo-50/50">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleAiImageUpload}
+                              className="hidden"
+                              id="ai-image-upload"
+                            />
+                            <label htmlFor="ai-image-upload" className="cursor-pointer">
+                              <div className="text-3xl mb-2">📸</div>
+                              <p className="text-sm font-medium text-indigo-600">สแกนรูปภาพบิล / รูปหน้างาน</p>
+                              <p className="text-xs text-slate-500 mt-1">อัปโหลดรูปเพื่อให้ AI ดึงข้อมูลลูกค้าให้</p>
+                            </label>
+                          </div>
+                        )}
+                        <button
+                          onClick={handleAiImageAnalyze}
+                          disabled={!aiImageBase64 || isAiLoading}
+                          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {isAiLoading ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                              กำลังสแกนรูปภาพ...
+                            </>
+                          ) : (
+                            '🤖 ให้ AI วิเคราะห์รูปภาพนี้'
+                          )}
+                        </button>
+                      </div>
+                    )}
+                    {activeAiTab === 'voice' && (
+                      <div className="space-y-2">
+                        <button
+                          type="button"
+                          onClick={toggleVoiceRecording}
+                          className={`w-full py-3 rounded-lg font-bold text-sm transition-all flex flex-col items-center justify-center gap-1 border-2 ${isRecording
+                            ? 'bg-red-50 text-red-600 border-red-200 shadow-inner'
+                            : 'bg-white text-indigo-600 border-indigo-100 hover:border-indigo-300'
+                            }`}
+                        >
+                          {isRecording ? (
+                            <>
+                              <span className="text-2xl animate-pulse">🔴</span>
+                              กำลังฟังเสียงของคุณ... (กดเพื่อหยุด)
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-2xl">🎤</span>
+                              กดปุ่มแล้วพูดสั่งงานได้เลย
+                            </>
+                          )}
+                        </button>
+
+                        {voiceTranscript && (
+                          <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-sm text-slate-700 min-h-[60px]">
+                            {voiceTranscript}
+                          </div>
+                        )}
+
+                        {voiceTranscript && (
+                          <button
+                            onClick={handleAiVoiceAnalyze}
+                            disabled={isAiLoading || isRecording}
+                            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                          >
+                            {isAiLoading ? (
+                              <>
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                กำลังวิเคราะห์เสียง...
+                              </>
+                            ) : (
+                              '🤖 ให้ AI วิเคราะห์ข้อความเสียง'
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Channel */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">ช่องทาง</label>
@@ -740,7 +1172,7 @@ export default function Home() {
 
               {/* Address */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">ที่อยู่</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">ที่อยู่ *</label>
                 <input
                   type="text"
                   value={formData.address || ''}

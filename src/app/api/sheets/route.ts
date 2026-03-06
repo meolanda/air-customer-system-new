@@ -121,7 +121,22 @@ export async function GET() {
     const rows = response.data.values || []
     const requests: ServiceRequest[] = rows.map(row => arrayToRequest(row, headers))
 
-    return NextResponse.json({ data: requests })
+    // Server-Side Data Filtering
+    const now = new Date()
+    const thirtyDaysAgo = new Date(now.setDate(now.getDate() - 30))
+
+    const filteredRequests = requests.filter(req => {
+      // Condition 1: Keep active jobs (not completed and not cancelled)
+      const isActive = req.status !== 'completed' && req.status !== 'cancelled'
+
+      // Condition 2: If completed/cancelled, must be within the last 30 days
+      const reqDate = new Date(req.createdAt)
+      const isRecent = reqDate >= thirtyDaysAgo
+
+      return isActive || isRecent
+    })
+
+    return NextResponse.json({ data: filteredRequests })
   } catch (error: unknown) {
     console.error('Error fetching from Google Sheets:', error)
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -284,6 +299,10 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
+    // Find the spreadsheet metadata to get sheetId
+    const metaResponse = await sheets.spreadsheets.get({ spreadsheetId })
+    const sheetId = metaResponse.data.sheets?.[0]?.properties?.sheetId ?? 0
+
     // Find the row with matching id
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
@@ -296,7 +315,7 @@ export async function DELETE(request: NextRequest) {
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]
       if (row && row[0] === id) {
-        rowIndex = i + 1 // 1-indexed for Google Sheets
+        rowIndex = i // 0-indexed for batchUpdate
         break
       }
     }
@@ -305,11 +324,21 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Record not found' }, { status: 404 })
     }
 
-    // Delete the row by clearing it (or we can use batchUpdate to actually remove the row)
-    // For simplicity, we'll clear the row content
-    await sheets.spreadsheets.values.clear({
+    // Actually delete the row (not just clear content)
+    await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
-      range: `Sheet1!A${rowIndex}:O${rowIndex}`,
+      requestBody: {
+        requests: [{
+          deleteDimension: {
+            range: {
+              sheetId,
+              dimension: 'ROWS',
+              startIndex: rowIndex,
+              endIndex: rowIndex + 1
+            }
+          }
+        }]
+      }
     })
 
     return NextResponse.json({ success: true })

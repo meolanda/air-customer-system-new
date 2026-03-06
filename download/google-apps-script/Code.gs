@@ -14,7 +14,9 @@
 const CONFIG = {
   SHEET_NAME: 'งานบริการ',
   USERS_SHEET: 'Users',
-  DRIVE_FOLDER_NAME: 'Aircon Service Images'
+  TECHNICIANS_SHEET: 'ช่าง',
+  DRIVE_FOLDER_NAME: 'Aircon Service Images',
+  CALENDAR_ID: 'c_fbb2cc1ab73bbed8f0db9d604c78d123e5fec24af3a5a9bc503aafbd1fd893b8@group.calendar.google.com'
 }
 
 // ==================== WEB APP ENDPOINTS ====================
@@ -145,7 +147,7 @@ function addRequest(request) {
     sheet.appendRow(row)
 
     // Clear cache
-    CacheService.getScriptCache().remove('requests');
+    CacheService.getScriptCache().remove('requests_v1');
 
     return { success: true, data: request }
   } finally {
@@ -185,7 +187,7 @@ function updateRequest(request) {
       sheet.getRange(i + 1, 1, 1, row.length).setValues([row])
       
       // Clear cache
-      CacheService.getScriptCache().remove('requests');
+      CacheService.getScriptCache().remove('requests_v1');
       
       return { success: true, data: updated }
     }
@@ -200,7 +202,8 @@ function createRequest(data) {
 }
 
 // Update status only (called from quick-action buttons in js.html)
-function updateStatus(id, newStatus) {
+// byName: ชื่อคนที่เปลี่ยนสถานะ (ส่งมาจาก js.html)
+function updateStatus(id, newStatus, byName) {
   const sheet = getOrCreateSheet();
   const data = sheet.getDataRange().getValues();
 
@@ -215,7 +218,7 @@ function updateStatus(id, newStatus) {
       history.push({
         status: newStatus,
         date: new Date().toISOString(),
-        by: 'System'
+        by: byName || 'System'
       });
 
       existing.status = newStatus;
@@ -223,7 +226,7 @@ function updateStatus(id, newStatus) {
 
       const row = objectToRow(existing, headers);
       sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
-      CacheService.getScriptCache().remove('requests');
+      CacheService.getScriptCache().remove('requests_v1');
       return { success: true };
     }
   }
@@ -240,7 +243,7 @@ function deleteRequest(id) {
     if (data[i][0] == id) {
       sheet.deleteRow(i + 1)
       // Clear cache
-      CacheService.getScriptCache().remove('requests');
+      CacheService.getScriptCache().remove('requests_v1');
       return { success: true }
     }
   }
@@ -267,8 +270,7 @@ function getUsers() {
     if (data[i][0]) {
       users.push({
         id: data[i][0],
-        name: data[i][1],
-        department: data[i][2]
+        name: data[i][1]
       })
     }
   }
@@ -282,23 +284,23 @@ function setupUsers() {
 
   if (!sheet) {
     sheet = ss.insertSheet(CONFIG.USERS_SHEET)
-    sheet.appendRow(['id', 'name', 'department'])
+    sheet.appendRow(['id', 'name'])
 
-    // Default users - 7 users as per actual setup
+    // Default users (name only, no department)
     const defaultUsers = [
-      ['admin1', 'คุณเนย', 'admin'],
-      ['admin2', 'คุณฟิล์ม', 'admin'],
-      ['admin3', 'คุณตุ้ม', 'admin'],
-      ['admin4', 'คุณดอย', 'admin'],
-      ['admin5', 'คุณดอจ', 'admin'],
-      ['quote1', 'คุณออมสิน', 'quotation'],
-      ['procure1', 'คุณเผือก', 'procurement']
+      ['u1', 'คุณเนย'],
+      ['u2', 'คุณฟิล์ม'],
+      ['u3', 'คุณตุ้ม'],
+      ['u4', 'คุณดอย'],
+      ['u5', 'คุณดอจ'],
+      ['u6', 'คุณออมสิน'],
+      ['u7', 'คุณเผือก']
     ]
 
     defaultUsers.forEach(u => sheet.appendRow(u))
 
     // Style
-    const range = sheet.getRange(1, 1, 1, 3)
+    const range = sheet.getRange(1, 1, 1, 2)
     range.setBackground('#4F46E5')
     range.setFontColor('white')
     range.setFontWeight('bold')
@@ -428,9 +430,19 @@ function analyzeImageWithAI(base64Data) {
     const mimeType = base64Data.split(';')[0].split(':')[1];
     const base64 = base64Data.split(',')[1];
 
-    const prompt = `วิเคราะห์รูปภาพนี้ซึ่งเป็นข้อความหรือภาพหน้าจอจากลูกค้าที่ต้องการบริการแอร์คอนดิชั่น
-แยกข้อมูลและตอบเป็น JSON เท่านั้น (ไม่มีคำอธิบายเพิ่ม):
-{"customerName":"ชื่อลูกค้า","phone":"เบอร์โทร 10 หลักตัวเลขล้วน","address":"ที่อยู่หรือสถานที่","serviceType":"ล้างแอร์หรือซ่อมหรือติดตั้งหรือตรวจสอบหรืออื่นๆ","priority":"normal หรือ urgent หรือ emergency","description":"สรุปรายละเอียดงานทั้งหมด"}`;
+    const prompt = `วิเคราะห์รูปภาพหรือข้อความจากลูกค้าที่ต้องการใช้บริการแอร์คอนดิชั่น
+แยกข้อมูลและตอบกลับเป็นรูปแบบ JSON เท่านั้น โดยปฏิบัติตามกฎต่อไปนี้อย่างเคร่งครัด:
+
+1. customerName: "ระบุเฉพาะชื่อบุคคล, แสลงเรียกบุคคล หรือ แบรนด์/บริษัท/องค์กร เท่านั้น" (ตัวอย่าง: KFC, สตาร์บัคส์, พี่สมชาย, น้องเอ)
+   ***ข้อควรระวังขั้นเด็ดขาด: ห้ามนำ "คำกริยา, คำสั่ง หรือรายละเอียดงาน" (เช่น "ราคาติดตั้ง...", "ส่งช่าง...", "แอร์ไม่เย็น") มาใส่ในช่องนี้เด็ดขาด หากข้อความไม่มีชื่อคนหรือแบรนด์ชัดเจน ให้เว้นว่างไว้ ("")***
+2. phone: "เบอร์โทรศัพท์" (ถ้ามี)
+3. address: "ชื่อสาขา, ชื่อโครงการ, หมู่บ้าน, สถานที่, หรือที่อยู่" (ตัวอย่าง: โฮมเวิร์คพัทยา, มาร์เก็ตเพลส เทพรักษ์, พลัมคอนโด) *สำคัญ: ให้สกัดชื่อสถานที่มาใส่ช่องนี้เสมอ อย่าปะปนกับชื่อลูกค้า*
+4. serviceType: เลือก 1 ในหมวดหมู่ต่อไปนี้เท่านั้น: "ล้างแอร์", "ซ่อม", "ติดตั้ง", "ตรวจสอบ" หรือ "อื่นๆ"
+5. priority: เลือกระดับความเร่งด่วน: "normal", "urgent", "emergency"
+6. description: "สรุปรายละเอียดคำสั่งงาน อาการแอร์ หรือสิ่งที่ลูกค้าต้องการทั้งหมด" (ตัวอย่าง: ราคาติดตั้ง CDU แอร์ขนาด 120,000 BTU ได้วันไหนครับ, ส่งช่างเข้าตรวจสอบระบบฮู้ดให้ด้วยครับ)
+
+ตอบเป็น JSON ล้วนๆ ห้ามมีเครื่องหมาย markdown หรือ \`\`\` ครอบ และห้ามมีคำอธิบายเพิ่มเติม:
+{"customerName":"","phone":"","address":"","serviceType":"","priority":"","description":""}`;
 
     const payload = {
       contents: [{ parts: [
@@ -465,7 +477,7 @@ function analyzeTextWithAI(text) {
     const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
     if (!apiKey) return { success: false, error: 'ไม่พบ GEMINI_API_KEY ใน Script Properties' };
 
-    const prompt = 'ข้อความต่อไปนี้มาจากลูกค้าที่ต้องการบริการแอร์คอนดิชั่น:\n"' + text + '"\n\nแยกข้อมูลและตอบเป็น JSON เท่านั้น (ไม่มีคำอธิบายเพิ่ม):\n{"customerName":"ชื่อลูกค้า","phone":"เบอร์โทร 10 หลักตัวเลขล้วน","address":"ที่อยู่หรือสถานที่","serviceType":"ล้างแอร์หรือซ่อมหรือติดตั้งหรือตรวจสอบหรืออื่นๆ","priority":"normal หรือ urgent หรือ emergency","description":"สรุปรายละเอียดงานทั้งหมด"}';
+    const prompt = 'วิเคราะห์ข้อความต่อไปนี้จากลูกค้าที่ต้องการใช้บริการแอร์คอนดิชั่น:\n"' + text + '"\n\nแยกข้อมูลและตอบกลับเป็นรูปแบบ JSON เท่านั้น โดยปฏิบัติตามกฎต่อไปนี้อย่างเคร่งครัด:\n\n1. customerName: "ระบุเฉพาะชื่อบุคคล, แสลงเรียกบุคคล หรือ แบรนด์/บริษัท/องค์กร เท่านั้น" (ตัวอย่าง: KFC, สตาร์บัคส์, พี่สมชาย, น้องเอ)\n   ***ข้อควรระวังขั้นเด็ดขาด: ห้ามนำ "คำกริยา, คำสั่ง หรือรายละเอียดงาน" (เช่น "ราคาติดตั้ง...", "ส่งช่าง...", "แอร์ไม่เย็น") มาใส่ในช่องนี้เด็ดขาด หากข้อความไม่มีชื่อคนหรือแบรนด์ชัดเจน ให้เว้นว่างไว้ ("")***\n2. phone: "เบอร์โทรศัพท์" (ถ้ามี)\n3. address: "ชื่อสาขา, ชื่อโครงการ, หมู่บ้าน, สถานที่, หรือที่อยู่" (ตัวอย่าง: โฮมเวิร์คพัทยา, มาร์เก็ตเพลส เทพรักษ์, พลัมคอนโด) *สำคัญ: ให้สกัดชื่อสถานที่มาใส่ช่องนี้เสมอ อย่าปะปนกับชื่อลูกค้า*\n4. serviceType: เลือก 1 ในหมวดหมู่ต่อไปนี้เท่านั้น: "ล้างแอร์", "ซ่อม", "ติดตั้ง", "ตรวจสอบ" หรือ "อื่นๆ"\n5. priority: เลือกระดับความเร่งด่วน: "normal", "urgent", "emergency"\n6. description: "สรุปรายละเอียดคำสั่งงาน อาการแอร์ หรือสิ่งที่ลูกค้าต้องการทั้งหมด" (ตัวอย่าง: ราคาติดตั้ง CDU แอร์ขนาด 120,000 BTU ได้วันไหนครับ, ส่งช่างเข้าตรวจสอบระบบฮู้ดให้ด้วยครับ)\n\nตอบเป็น JSON ล้วนๆ ห้ามมีเครื่องหมาย markdown หรือ ``` ครอบ และห้ามมีคำอธิบายเพิ่มเติม:\n{"customerName":"","phone":"","address":"","serviceType":"","priority":"","description":""}';
 
     const payload = {
       contents: [{ parts: [{ text: prompt }] }],
@@ -589,19 +601,19 @@ function runDiagnostics() {
 
 // ==================== USER MANAGEMENT API ====================
 
-// Add new user
-function addUser(name, department) {
+// Add new user (name only, no department)
+function addUser(name) {
   const ss = SpreadsheetApp.getActiveSpreadsheet()
-  const sheet = ss.getSheetByName(CONFIG.USERS_SHEET)
+  let sheet = ss.getSheetByName(CONFIG.USERS_SHEET)
+  if (!sheet) { setupUsers(); sheet = ss.getSheetByName(CONFIG.USERS_SHEET) }
   const newId = 'user_' + Date.now()
-  sheet.appendRow([newId, name, department])
+  sheet.appendRow([newId, name])
   
   // Return updated users list
   const data = sheet.getDataRange().getValues()
-  const users = data.slice(1).map(row => ({
+  const users = data.slice(1).filter(row => row[0]).map(row => ({
     id: row[0],
-    name: row[1],
-    department: row[2]
+    name: row[1]
   }))
   return { success: true, users: users }
 }
@@ -618,13 +630,153 @@ function deleteUser(id) {
       
       // Return updated users list
       const newData = sheet.getDataRange().getValues()
-      const users = newData.length > 1 ? newData.slice(1).map(row => ({
+      const users = newData.length > 1 ? newData.slice(1).filter(row => row[0]).map(row => ({
         id: row[0],
-        name: row[1],
-        department: row[2]
+        name: row[1]
       })) : []
       return { success: true, users: users }
     }
   }
   return { success: false, error: 'User not found' }
+}
+// ==================== TECHNICIAN MANAGEMENT ====================
+
+function setupTechnicians() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  let sheet = ss.getSheetByName(CONFIG.TECHNICIANS_SHEET)
+  if (!sheet) {
+    sheet = ss.insertSheet(CONFIG.TECHNICIANS_SHEET)
+    sheet.appendRow(['id', 'name'])
+    const defaults = [
+      ['tech1', 'ช่างสมชาย'],
+      ['tech2', 'ช่างสมศักดิ์'],
+      ['tech3', 'ช่างสมปอง']
+    ]
+    defaults.forEach(r => sheet.appendRow(r))
+    sheet.getRange(1, 1, 1, 2).setBackground('#059669').setFontColor('white').setFontWeight('bold')
+  }
+  return sheet
+}
+
+function getTechnicians() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  let sheet = ss.getSheetByName(CONFIG.TECHNICIANS_SHEET)
+  if (!sheet) { setupTechnicians(); sheet = ss.getSheetByName(CONFIG.TECHNICIANS_SHEET) }
+  const data = sheet.getDataRange().getValues()
+  if (data.length <= 1) return []
+  return data.slice(1).filter(r => r[0]).map(r => ({ id: r[0], name: r[1] }))
+}
+
+function addTechnician(name) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  let sheet = ss.getSheetByName(CONFIG.TECHNICIANS_SHEET)
+  if (!sheet) { setupTechnicians(); sheet = ss.getSheetByName(CONFIG.TECHNICIANS_SHEET) }
+  const id = 'tech_' + Date.now()
+  sheet.appendRow([id, name])
+  const data = sheet.getDataRange().getValues()
+  return { success: true, technicians: data.slice(1).filter(r => r[0]).map(r => ({ id: r[0], name: r[1] })) }
+}
+
+function deleteTechnician(id) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  const sheet = ss.getSheetByName(CONFIG.TECHNICIANS_SHEET)
+  if (!sheet) return { success: false, error: 'Sheet not found' }
+  const data = sheet.getDataRange().getValues()
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] == id) {
+      sheet.deleteRow(i + 1)
+      const newData = sheet.getDataRange().getValues()
+      return { success: true, technicians: newData.length > 1 ? newData.slice(1).filter(r => r[0]).map(r => ({ id: r[0], name: r[1] })) : [] }
+    }
+  }
+  return { success: false, error: 'Not found' }
+}
+
+// ==================== CALENDAR INTEGRATION ====================
+
+function createCalendarEvent(requestId, technicianName, dateTimeISO, durationMinutes, note) {
+  try {
+    // 1. Get calendar
+    let cal
+    try {
+      cal = CalendarApp.getCalendarById(CONFIG.CALENDAR_ID)
+      if (!cal) throw new Error('Calendar not found')
+    } catch (e) {
+      cal = CalendarApp.getDefaultCalendar()
+    }
+
+    // 2. Find the request
+    const sheet = getOrCreateSheet()
+    const data = sheet.getDataRange().getValues()
+    const headers = data[0]
+    let rowIndex = -1
+    let requestObj = null
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === String(requestId)) {
+        rowIndex = i + 1
+        requestObj = rowToObject(data[i], headers)
+        break
+      }
+    }
+    if (rowIndex === -1) return { success: false, error: 'Request not found' }
+
+    // 3. Create calendar event
+    const start = new Date(dateTimeISO)
+    const end = new Date(start.getTime() + (durationMinutes || 60) * 60000)
+    const customerName = requestObj.customerName || ''
+    const address = requestObj.address || ''
+    const serviceType = requestObj.serviceType || ''
+    const reqNo = requestObj.requestNo || requestId
+
+    const title = customerName || ('งานบริการ ' + reqNo);
+    const eventDescription = requestObj.description ? requestObj.description + '\n\n' : '';
+    const eventPhone = requestObj.phone ? 'เบอร์ติดต่อร้าน ' + requestObj.phone + '\n\n' : '';
+    const eventNote = note ? note + '\n\n' : '';
+    
+    // สร้าง Description เหมือนในรูปตัวอย่าง
+    const description = eventDescription
+      + eventPhone
+      + eventNote
+      + 'เลขงาน: ' + reqNo;
+
+    const event = cal.createEvent(title, start, end, {
+      description: description,
+      location: address
+    })
+    const eventId = event.getId()
+
+    // 4. Update sheet: add technicianName + calendarEventId
+    // Check if columns exist, add if not
+    const techColIdx = headers.indexOf('technicianName')
+    const eventColIdx = headers.indexOf('calendarEventId')
+    const lastCol = headers.length + 1
+    
+    if (techColIdx === -1) {
+      sheet.getRange(1, lastCol).setValue('technicianName')
+      headers.push('technicianName')
+    }
+    if (eventColIdx === -1) {
+      sheet.getRange(1, headers.length + (techColIdx === -1 ? 0 : 1)).setValue('calendarEventId')
+      headers.push('calendarEventId')
+    }
+
+    // Re-read headers after possible update
+    const freshHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+    requestObj.technicianName = technicianName
+    requestObj.calendarEventId = eventId
+    requestObj.appointmentDate = dateTimeISO
+
+    const updatedRow = objectToRow(requestObj, freshHeaders)
+    sheet.getRange(rowIndex, 1, 1, updatedRow.length).setValues([updatedRow])
+    CacheService.getScriptCache().remove('requests_v1')
+
+    return {
+      success: true,
+      eventId: eventId,
+      eventLink: event.getId() ? 'https://calendar.google.com/calendar/r' : ''
+    }
+  } catch (e) {
+    Logger.log('createCalendarEvent error: ' + e.message)
+    return { success: false, error: e.message }
+  }
 }
