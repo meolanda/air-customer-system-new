@@ -28,6 +28,8 @@ interface ServiceRequest {
   notes: string
   imageUrl: string
   history: { status: Status; date: string; by: string }[]
+  calendarEventId?: string
+  calendarEventUrl?: string
 }
 
 // Real employee list (name only, no department)
@@ -145,6 +147,30 @@ export default function Home() {
     return () => unsubscribe()
   }, [user])
 
+  // One-time auto-import if database is empty
+  useEffect(() => {
+    if (!user || isLoading || requests.length > 0) return
+
+    const hasImported = sessionStorage.getItem('auto_imported')
+    if (hasImported) return
+
+    const triggerImport = async () => {
+      try {
+        console.log('Detected empty database, triggering auto-import from Sheets...')
+        const res = await fetch('/api/import')
+        const data = await res.json()
+        if (data.success && data.count > 0) {
+          console.log(`Successfully auto-imported ${data.count} records from Sheets.`)
+          sessionStorage.setItem('auto_imported', 'true')
+        }
+      } catch (e) {
+        console.error('Auto-import failed:', e)
+      }
+    }
+
+    triggerImport()
+  }, [user, isLoading, requests.length])
+
   // Login
   const handleLogin = (selectedUser: User) => {
     setUser(selectedUser)
@@ -254,6 +280,38 @@ export default function Home() {
     }
   }, [requests, user])
 
+  // Telegram Notification Helper
+  const sendTelegramNotification = async (requestData: ServiceRequest, action: 'NEW' | 'UPDATE') => {
+    try {
+      const statusText = STATUS_CONFIG[requestData.status].label
+      const priorityText = requestData.priority === 'urgent' ? '🟡 เร่งด่วน' : requestData.priority === 'emergency' ? '🔴 ฉุกเฉิน' : 'ปกติ'
+
+      let message = `<b>🔔 แจ้งเตือน: ${action === 'NEW' ? 'งานใหม่เข้า' : 'อัปเดตสถานะงาน'}</b>\n\n`
+      message += `<b>เลขที่งาน:</b> ${requestData.requestNo}\n`
+      message += `<b>ลูกค้า:</b> ${requestData.customerName}\n`
+      message += `<b>ประเภทงาน:</b> ${requestData.serviceType}\n`
+      message += `<b>สถานะ:</b> ${statusText}\n`
+      message += `<b>ความเร่งด่วน:</b> ${priorityText}\n`
+      message += `<b>ทำรายการโดย:</b> ${user?.name || 'System'}`
+
+      if (requestData.description) {
+        message += `\n\n<b>รายละเอียด:</b> ${requestData.description}`
+      }
+
+      if (requestData.imageUrl) {
+        message += `\n\n<b><a href="${requestData.imageUrl}">🖼️ ดูรูปภาพประกอบ</a></b>`
+      }
+
+      await fetch('/api/telegram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message })
+      })
+    } catch (error) {
+      console.error('Error sending Telegram notification:', error)
+    }
+  }
+
   // Handle form
   const handleSubmit = async () => {
     if (!formData.customerName || !formData.phone || !formData.address) {
@@ -280,6 +338,66 @@ export default function Home() {
 
         // Save to Firebase (state will update automatically via onValue)
         await set(ref(db, `serviceRequests/${updatedRequest.id}`), updatedRequest)
+
+        // Notify if status changed
+        if (statusChanged) {
+          sendTelegramNotification(updatedRequest, 'UPDATE')
+        }
+
+        // Sync to Google Sheets if completed or cancelled
+        // Sync to Google Sheets immediately (1:1 sync)
+        try {
+          // Attempt to PUT to Sheets
+          const resSheet = await fetch('/api/sheets', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatedRequest)
+          });
+
+          // Check for errors
+          if (!resSheet.ok) {
+            const errorData = await resSheet.json().catch(() => ({ error: 'Unknown error' }));
+            console.error('Sheets sync failed:', errorData);
+            alert(`⚠️ ไม่สามารถ sync ไปยัง Google Sheets ได้: ${errorData.error || errorData.details || 'Unknown error'}`);
+          }
+
+          // Fallback to POST if not found
+          if (resSheet.status === 404) {
+            const resPost = await fetch('/api/sheets', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(updatedRequest)
+            });
+
+            if (!resPost.ok) {
+              const errorData = await resPost.json().catch(() => ({ error: 'Unknown error' }));
+              console.error('Sheets sync (POST) failed:', errorData);
+              alert(`⚠️ ไม่สามารถ sync ไปยัง Google Sheets ได้: ${errorData.error || errorData.details || 'Unknown error'}`);
+            }
+          }
+        } catch (e) {
+          console.error('Failed to sync update to Google Sheets:', e);
+          alert('⚠️ เกิดข้อผิดพลาดในการ sync ไปยัง Google Sheets กรุณาตรวจสอบ console');
+        }
+
+        // Sync to Google Calendar if status changed to queue
+        if (newStatus === 'queue' && !updatedRequest.calendarEventId) {
+          try {
+            const res = await fetch('/api/calendar', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(updatedRequest)
+            })
+            const result = await res.json()
+            if (result.success && result.data?.eventId) {
+              updatedRequest.calendarEventId = result.data.eventId
+              if (result.data.eventUrl) updatedRequest.calendarEventUrl = result.data.eventUrl
+              await set(ref(db, `serviceRequests/${updatedRequest.id}`), updatedRequest)
+            }
+          } catch (e) {
+            console.error('Failed to sync to Calendar:', e)
+          }
+        }
       } else {
         // Create
         const newRequest: ServiceRequest = {
@@ -302,6 +420,39 @@ export default function Home() {
 
         // Save to Firebase (state will update automatically via onValue)
         await set(ref(db, `serviceRequests/${newRequest.id}`), newRequest)
+
+        // Notify new job
+        sendTelegramNotification(newRequest, 'NEW')
+
+        // Sync to Google Sheets immediately (1:1 sync)
+        try {
+          await fetch('/api/sheets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newRequest)
+          })
+        } catch (e) {
+          console.error('Failed to sync to Google Sheets:', e)
+        }
+
+        // Sync to Google Calendar if created as queue
+        if (newRequest.status === 'queue') {
+          try {
+            const res = await fetch('/api/calendar', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(newRequest)
+            })
+            const result = await res.json()
+            if (result.success && result.data?.eventId) {
+              newRequest.calendarEventId = result.data.eventId
+              if (result.data.eventUrl) newRequest.calendarEventUrl = result.data.eventUrl
+              await set(ref(db, `serviceRequests/${newRequest.id}`), newRequest)
+            }
+          } catch (e) {
+            console.error('Failed to sync to Calendar:', e)
+          }
+        }
       }
       closeModal()
     } catch (error) {
@@ -349,10 +500,51 @@ export default function Home() {
       ...request,
       status: newStatus,
       history: [...request.history, { status: newStatus, date: new Date().toISOString(), by: user?.name || 'System' }]
-    }
+    } as ServiceRequest
 
     try {
+      if (newStatus === 'queue' && !request.calendarEventId) {
+        try {
+          const res = await fetch('/api/calendar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatedRequest)
+          })
+          const result = await res.json()
+          if (result.success && result.data?.eventId) {
+            updatedRequest.calendarEventId = result.data.eventId
+            if (result.data.eventUrl) updatedRequest.calendarEventUrl = result.data.eventUrl
+          }
+        } catch (e) {
+          console.error('Failed to sync to Calendar:', e)
+        }
+      }
+
       await update(ref(db, `serviceRequests/${id}`), updatedRequest)
+
+      // Notify status update
+      sendTelegramNotification(updatedRequest as ServiceRequest, 'UPDATE')
+
+      // Auto sync to Google Sheets always (1:1 sync)
+      try {
+        await fetch('/api/sheets', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedRequest)
+        })
+          // If PUT fails (record not found), try POST
+          .then(async res => {
+            if (res.status === 404) {
+              await fetch('/api/sheets', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatedRequest)
+              })
+            }
+          })
+      } catch (e) {
+        console.error('Failed to sync to Google Sheets:', e)
+      }
     } catch (error) {
       console.error('Error updating status:', error)
       alert('อัปเดตสถานะไม่สำเร็จ กรุณาลองใหม่')
@@ -364,6 +556,22 @@ export default function Home() {
 
     try {
       await remove(ref(db, `serviceRequests/${id}`))
+
+      // Sync Delete to Google Sheets
+      try {
+        const resSheet = await fetch(`/api/sheets?id=${id}`, {
+          method: 'DELETE'
+        });
+
+        if (!resSheet.ok) {
+          const errorData = await resSheet.json().catch(() => ({ error: 'Unknown error' }));
+          console.error('Sheets delete sync failed:', errorData);
+          alert(`⚠️ ไม่สามารถลบจาก Google Sheets ได้: ${errorData.error || errorData.details || 'Unknown error'}`);
+        }
+      } catch (e) {
+        console.error('Failed to sync delete to Google Sheets:', e);
+        alert('⚠️ เกิดข้อผิดพลาดในการลบจาก Google Sheets กรุณาตรวจสอบ console');
+      }
     } catch (error) {
       console.error('Error deleting:', error)
       alert('ลบไม่สำเร็จ กรุณาลองใหม่')
@@ -488,7 +696,7 @@ export default function Home() {
       return
     }
 
-     
+
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (!SR) {
       alert('บราวเซอร์นี้ไม่รองรับการรับเสียง กรุณาใช้ Chrome บน PC หรือ Android')
@@ -501,7 +709,7 @@ export default function Home() {
     recognition.continuous = true
     recognition.interimResults = true
 
-     
+
     recognition.onresult = (e: any) => {
       let t = ''
       for (let i = 0; i < e.results.length; i++) {
@@ -767,7 +975,7 @@ export default function Home() {
             <p className="text-slate-500">ไม่มีงานที่ต้องดำเนินการ</p>
           </div>
         ) : viewMode === 'table' ? (
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hidden sm:block">
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
@@ -783,7 +991,13 @@ export default function Home() {
                   {departmentRequests.map((request) => (
                     <tr key={request.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className="px-4 py-3 align-top">
-                        <div className="font-mono text-sm text-blue-600">{request.requestNo}</div>
+                        <div className="font-mono text-sm text-blue-600">
+                          {request.calendarEventUrl ? (
+                            <a href={request.calendarEventUrl} target="_blank" rel="noreferrer" className="hover:underline" title="เปิดปฏิทิน">📅 {request.requestNo}</a>
+                          ) : (
+                            request.requestNo
+                          )}
+                        </div>
                         <div className="text-xs text-slate-500">{formatDate(request.createdAt)}</div>
                       </td>
                       <td className="px-4 py-3 align-top">
@@ -848,12 +1062,18 @@ export default function Home() {
             </div>
           </div>
         ) : (
-          <div className="space-y-3 sm:hidden sm:grid sm:grid-cols-2 sm:gap-4 sm:space-y-0 lg:grid-cols-3">
+          <div className="space-y-3 sm:grid sm:grid-cols-2 sm:gap-4 sm:space-y-0 lg:grid-cols-3">
             {departmentRequests.map((request) => (
               <div key={request.id} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200">
                 <div className="flex items-start justify-between mb-2">
                   <div>
-                    <span className="text-xs font-mono text-blue-600">{request.requestNo}</span>
+                    <span className="text-xs font-mono text-blue-600">
+                      {request.calendarEventUrl ? (
+                        <a href={request.calendarEventUrl} target="_blank" rel="noreferrer" className="hover:underline" title="เปิดปฏิทิน">📅 {request.requestNo}</a>
+                      ) : (
+                        request.requestNo
+                      )}
+                    </span>
                     <span className="mx-2 text-slate-300">|</span>
                     <span className="text-xs text-slate-500">{formatDate(request.createdAt)}</span>
                   </div>
@@ -1282,6 +1502,17 @@ export default function Home() {
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* Appointment Date */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">วันที่นัดหมาย (ถ้ามี)</label>
+                <input
+                  type="datetime-local"
+                  value={formData.appointmentDate || ''}
+                  onChange={(e) => setFormData(prev => ({ ...prev, appointmentDate: e.target.value }))}
+                  className="w-full px-3 py-2 border rounded-xl text-sm"
+                />
               </div>
 
               {/* Status */}

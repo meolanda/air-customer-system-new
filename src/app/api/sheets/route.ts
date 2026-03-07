@@ -18,6 +18,8 @@ interface ServiceRequest {
   notes: string
   imageUrl: string
   history: { status: string; date: string; by: string }[]
+  calendarEventId?: string
+  calendarEventUrl?: string
 }
 
 // Initialize Google Sheets client
@@ -65,6 +67,8 @@ function arrayToRequest(row: string[], headers: string[]): ServiceRequest {
     notes: obj['notes'] || '',
     imageUrl: obj['imageUrl'] || '',
     history,
+    calendarEventId: obj['calendarEventId'] || '',
+    calendarEventUrl: obj['calendarEventUrl'] || '',
   }
 }
 
@@ -86,6 +90,8 @@ function requestToArray(request: ServiceRequest): string[] {
     request.notes,
     request.imageUrl,
     JSON.stringify(request.history),
+    request.calendarEventId || '',
+    request.calendarEventUrl || '',
   ]
 }
 
@@ -104,18 +110,19 @@ export async function GET() {
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Sheet1!A2:O', // Skip header row
+      range: 'Sheet1!A2:Q', // Skip header row
     })
 
     const headerResponse = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Sheet1!A1:O1',
+      range: 'Sheet1!A1:Q1',
     })
 
     const headers = headerResponse.data.values?.[0] || [
       'id', 'requestNo', 'createdAt', 'channel', 'customerName',
       'phone', 'address', 'serviceType', 'description', 'priority',
-      'status', 'appointmentDate', 'notes', 'imageUrl', 'history'
+      'status', 'appointmentDate', 'notes', 'imageUrl', 'history',
+      'calendarEventId', 'calendarEventUrl'
     ]
 
     const rows = response.data.values || []
@@ -177,13 +184,15 @@ export async function POST(request: NextRequest) {
       notes: body.notes || '',
       imageUrl: body.imageUrl || '',
       history: body.history || [{ status: 'new', date: new Date().toISOString(), by: 'System' }],
+      calendarEventId: body.calendarEventId || '',
+      calendarEventUrl: body.calendarEventUrl || '',
     }
 
     const row = requestToArray(newRequest)
 
     await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: 'Sheet1!A:O',
+      range: 'Sheet1!A:Q',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [row],
@@ -240,13 +249,14 @@ export async function PUT(request: NextRequest) {
     // Get existing data
     const existingResponse = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `Sheet1!A${rowIndex}:O${rowIndex}`,
+      range: `Sheet1!A${rowIndex}:Q${rowIndex}`,
     })
 
     const existingRow = existingResponse.data.values?.[0] || []
     const headers = ['id', 'requestNo', 'createdAt', 'channel', 'customerName',
       'phone', 'address', 'serviceType', 'description', 'priority',
-      'status', 'appointmentDate', 'notes', 'imageUrl', 'history']
+      'status', 'appointmentDate', 'notes', 'imageUrl', 'history',
+      'calendarEventId', 'calendarEventUrl']
 
     const existingRequest = arrayToRequest(existingRow, headers)
 
@@ -261,7 +271,7 @@ export async function PUT(request: NextRequest) {
 
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `Sheet1!A${rowIndex}:O${rowIndex}`,
+      range: `Sheet1!A${rowIndex}:Q${rowIndex}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [updatedRow],
@@ -299,10 +309,6 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    // Find the spreadsheet metadata to get sheetId
-    const metaResponse = await sheets.spreadsheets.get({ spreadsheetId })
-    const sheetId = metaResponse.data.sheets?.[0]?.properties?.sheetId ?? 0
-
     // Find the row with matching id
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
@@ -331,7 +337,7 @@ export async function DELETE(request: NextRequest) {
         requests: [{
           deleteDimension: {
             range: {
-              sheetId,
+              sheetId: 0,
               dimension: 'ROWS',
               startIndex: rowIndex,
               endIndex: rowIndex + 1
