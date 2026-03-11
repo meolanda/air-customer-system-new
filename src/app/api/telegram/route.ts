@@ -5,8 +5,8 @@ export async function POST(request: Request) {
         const { message } = await request.json();
 
         // We will store these in .env.local shortly
-        const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-        const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+        const TELEGRAM_BOT_TOKEN = process.env['TELEGRAM_BOT_TOKEN'];
+        const TELEGRAM_CHAT_ID = process.env['TELEGRAM_CHAT_ID'];
 
         if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
             console.error('Missing Telegram Credentials');

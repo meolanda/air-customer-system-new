@@ -1,9 +1,9 @@
 import { google } from 'googleapis'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { ref, set } from 'firebase/database'
 import { db } from '@/lib/firebase'
 
-export async function GET(request: NextRequest) {
+export async function GET() {
     try {
         const auth = new google.auth.GoogleAuth({
             credentials: {
@@ -28,16 +28,20 @@ export async function GET(request: NextRequest) {
         const rows = response.data.values || []
 
         // First row is headers
-        if (rows.length <= 1) {
+        if (!rows || rows.length <= 1) {
             return NextResponse.json({ success: true, message: 'No data to import' })
         }
 
         const headers = rows[0]
+        if (!headers) {
+            return NextResponse.json({ error: 'No headers found' }, { status: 500 })
+        }
+
         let importedCount = 0
 
         for (let i = 1; i < rows.length; i++) {
             const row = rows[i]
-            if (!row[0]) continue // skip empty rows
+            if (!row || !row[0]) continue // skip empty rows
 
             const obj: Record<string, any> = {}
             headers.forEach((header, index) => {
