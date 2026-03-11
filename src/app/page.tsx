@@ -426,13 +426,20 @@ export default function Home() {
 
         // Sync to Google Sheets immediately (1:1 sync)
         try {
-          await fetch('/api/sheets', {
+          const resSheet = await fetch('/api/sheets', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(newRequest)
-          })
+          });
+          
+          if (!resSheet.ok) {
+            const errorData = await resSheet.json().catch(() => ({ error: 'Unknown error' }));
+            console.error('Sheets sync (POST) failed:', errorData);
+            alert(`⚠️ ไม่สามารถ sync งานใหม่ไปยัง Google Sheets ได้: ${errorData.error || errorData.details || 'Unknown error'}`);
+          }
         } catch (e) {
-          console.error('Failed to sync to Google Sheets:', e)
+          console.error('Failed to sync new request to Google Sheets:', e);
+          alert('⚠️ เกิดข้อผิดพลาดในการ sync งานใหม่ไปยัง Google Sheets กรุณาตรวจสอบ console');
         }
 
         // Sync to Google Calendar if created as queue
