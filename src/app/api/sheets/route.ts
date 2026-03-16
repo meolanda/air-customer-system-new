@@ -110,12 +110,12 @@ export async function GET() {
 
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Sheet1!A2:Q', // Skip header row
+      range: 'งานบริการ!A2:Q', // Skip header row
     })
 
     const headerResponse = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Sheet1!A1:Q1',
+      range: 'งานบริการ!A1:Q1',
     })
 
     const headers = headerResponse.data.values?.[0] || [
@@ -192,7 +192,7 @@ export async function POST(request: NextRequest) {
 
     await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: 'Sheet1!A:Q',
+      range: 'งานบริการ!A:Q',
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [row],
@@ -228,7 +228,7 @@ export async function PUT(request: NextRequest) {
     // Find the row with matching id
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Sheet1!A:A',
+      range: 'งานบริการ!A:A',
     })
 
     const rows = response.data.values || []
@@ -249,7 +249,7 @@ export async function PUT(request: NextRequest) {
     // Get existing data
     const existingResponse = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `Sheet1!A${rowIndex}:Q${rowIndex}`,
+      range: `งานบริการ!A${rowIndex}:Q${rowIndex}`,
     })
 
     const existingRow = existingResponse.data.values?.[0] || []
@@ -271,7 +271,7 @@ export async function PUT(request: NextRequest) {
 
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `Sheet1!A${rowIndex}:Q${rowIndex}`,
+      range: `งานบริการ!A${rowIndex}:Q${rowIndex}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [updatedRow],
@@ -312,7 +312,7 @@ export async function DELETE(request: NextRequest) {
     // Find the row with matching id
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Sheet1!A:A',
+      range: 'งานบริการ!A:A',
     })
 
     const rows = response.data.values || []

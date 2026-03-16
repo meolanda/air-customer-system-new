@@ -43,7 +43,7 @@ export async function GET() {
     // Step 3: Try read sheet
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: sheetId,
-      range: 'Sheet1!A1:C3',
+      range: 'งานบริการ!A1:C3',
     })
 
     results['sheets_read'] = {
