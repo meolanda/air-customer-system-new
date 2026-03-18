@@ -58,14 +58,19 @@ async function getGoogleSheetsClient() {
   return google.sheets({ version: 'v4', auth })
 }
 
-// Get the actual first sheet tab name (handles Thai locale 'แผ่น1' vs 'Sheet1')
-async function getSheetTabName(sheets: ReturnType<typeof google.sheets>, spreadsheetId: string): Promise<string> {
-  const configuredName = process.env['GOOGLE_SHEETS_TAB_NAME']
-  if (configuredName) return configuredName
-
+// Get the actual first sheet tab name and sheetId
+async function getSheetMeta(sheets: ReturnType<typeof google.sheets>, spreadsheetId: string): Promise<{ tabName: string; sheetId: number }> {
   const meta = await sheets.spreadsheets.get({ spreadsheetId })
-  const firstName = meta.data.sheets?.[0]?.properties?.title
-  return firstName || 'Sheet1'
+  const firstSheet = meta.data.sheets?.[0]
+  const configuredName = process.env['GOOGLE_SHEETS_TAB_NAME']
+  const tabName = configuredName || firstSheet?.properties?.title || 'Sheet1'
+  const sheetId = firstSheet?.properties?.sheetId ?? 0
+  return { tabName, sheetId }
+}
+
+async function getSheetTabName(sheets: ReturnType<typeof google.sheets>, spreadsheetId: string): Promise<string> {
+  const { tabName } = await getSheetMeta(sheets, spreadsheetId)
+  return tabName
 }
 
 // Convert array to ServiceRequest object
@@ -356,7 +361,7 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    const tabName = await getSheetTabName(sheets, spreadsheetId)
+    const { tabName, sheetId } = await getSheetMeta(sheets, spreadsheetId)
 
     // Find the row with matching id
     const response = await sheets.spreadsheets.values.get({
@@ -386,7 +391,7 @@ export async function DELETE(request: NextRequest) {
         requests: [{
           deleteDimension: {
             range: {
-              sheetId: 0,
+              sheetId,
               dimension: 'ROWS',
               startIndex: rowIndex,
               endIndex: rowIndex + 1

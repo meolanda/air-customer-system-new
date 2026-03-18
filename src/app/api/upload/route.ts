@@ -16,6 +16,8 @@ async function getGoogleDriveClient() {
 }
 
 // POST - Upload file to Google Drive
+export const maxDuration = 30 // Vercel max timeout 30 วินาที
+
 export async function POST(request: NextRequest) {
   if (!checkRateLimit(request)) return rateLimitResponse()
   try {
