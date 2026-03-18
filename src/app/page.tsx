@@ -411,13 +411,14 @@ export default function Home() {
           alert('⚠️ เกิดข้อผิดพลาดในการ sync ไปยัง Google Sheets กรุณาตรวจสอบ console');
         }
 
-        // Sync to Google Calendar if status changed to queue
-        if (newStatus === 'queue' && !updatedRequest.calendarEventId) {
+        // Sync to Google Calendar if status is queue (POST=ใหม่, PUT=อัพเดท/สร้างใหม่ถ้าถูกลบ)
+        if (newStatus === 'queue') {
           try {
+            const method = updatedRequest.calendarEventId ? 'PUT' : 'POST'
             const res = await fetch('/api/calendar', {
-              method: 'POST',
+              method,
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(updatedRequest)
+              body: JSON.stringify({ ...updatedRequest, eventId: updatedRequest.calendarEventId })
             })
             const result = await res.json()
             if (result.success && result.data?.eventId) {
@@ -541,12 +542,13 @@ export default function Home() {
     } as ServiceRequest
 
     try {
-      if (newStatus === 'queue' && !request.calendarEventId) {
+      if (newStatus === 'queue') {
         try {
+          const method = request.calendarEventId ? 'PUT' : 'POST'
           const res = await fetch('/api/calendar', {
-            method: 'POST',
+            method,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updatedRequest)
+            body: JSON.stringify({ ...updatedRequest, eventId: request.calendarEventId })
           })
           const result = await res.json()
           if (result.success && result.data?.eventId) {

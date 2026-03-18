@@ -91,3 +91,72 @@ export async function POST(request: NextRequest) {
         )
     }
 }
+
+// PUT - Update existing event, if deleted → create new one
+export async function PUT(request: NextRequest) {
+    try {
+        const body = await request.json()
+        const { eventId, requestNo, customerName, phone, address, serviceType, description, appointmentDate } = body
+
+        const calendar = await getGoogleCalendarClient()
+        const calendarId = process.env['GOOGLE_CALENDAR_ID']
+
+        if (!calendarId) {
+            return NextResponse.json({ error: 'GOOGLE_CALENDAR_ID not configured' }, { status: 500 })
+        }
+
+        if (!appointmentDate) {
+            return NextResponse.json({ error: 'appointmentDate is required' }, { status: 400 })
+        }
+
+        // Parse date with Bangkok timezone
+        const hasTimezone = appointmentDate.includes('+') || appointmentDate.endsWith('Z')
+        let startDate: Date
+        if (hasTimezone) {
+            startDate = new Date(appointmentDate)
+        } else if (appointmentDate.length <= 10) {
+            startDate = new Date(`${appointmentDate}T09:00:00+07:00`)
+        } else {
+            startDate = new Date(`${appointmentDate}+07:00`)
+        }
+        const endDate = new Date(startDate.getTime() + 2 * 60 * 60 * 1000)
+
+        const eventSummary = `[รอจัดช่าง] ${customerName} - ${serviceType}`
+        let eventDescription = `เลขที่งาน: ${requestNo}\nลูกค้า: ${customerName}\nเบอร์โทร: ${phone}`
+        if (address) eventDescription += `\nสถานที่: ${address}`
+        if (description) eventDescription += `\nอาการ/รายละเอียด: ${description}`
+        eventDescription += `\n\n**กรุณาเปลี่ยนชื่อหัวข้อเพื่อระบุตัวช่างที่รับผิดชอบ**`
+
+        const event = {
+            summary: eventSummary,
+            location: address || '',
+            description: eventDescription,
+            start: { dateTime: startDate.toISOString(), timeZone: 'Asia/Bangkok' },
+            end: { dateTime: endDate.toISOString(), timeZone: 'Asia/Bangkok' },
+            colorId: '5',
+        }
+
+        // Try update first, if event was deleted → create new one
+        if (eventId) {
+            try {
+                const response = await calendar.events.update({
+                    calendarId,
+                    eventId,
+                    requestBody: event,
+                })
+                return NextResponse.json({ success: true, data: { eventId: response.data.id, eventUrl: response.data.htmlLink } })
+            } catch (updateError: any) {
+                // Event not found (deleted) → fall through to create new
+                if (updateError.code !== 404 && updateError.status !== 404) throw updateError
+            }
+        }
+
+        // Create new event (either no eventId or old one was deleted)
+        const response = await calendar.events.insert({ calendarId, requestBody: event })
+        return NextResponse.json({ success: true, data: { eventId: response.data.id, eventUrl: response.data.htmlLink } })
+
+    } catch (error: any) {
+        console.error('Error updating Google Calendar event:', error)
+        return NextResponse.json({ error: 'Failed to update calendar event', details: error.message }, { status: 500 })
+    }
+}
