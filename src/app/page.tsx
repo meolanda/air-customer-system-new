@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import * as XLSX from 'xlsx'
 import { ref, onValue, set, update, remove } from 'firebase/database'
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
@@ -83,6 +83,7 @@ export default function Home() {
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [viewMode, setViewMode] = useState<'card' | 'table'>('card')
+  const [displayLimit, setDisplayLimit] = useState(50)
 
   // AI State
   const [isAiLoading, setIsAiLoading] = useState(false)
@@ -131,13 +132,15 @@ export default function Home() {
     if (!user) return
 
     setIsLoading(true)
+    const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
     const requestsRef = ref(db, 'serviceRequests')
     const unsubscribe = onValue(requestsRef, (snapshot) => {
       const data = snapshot.val()
       if (data) {
-        // Convert object to array and sort by createdAt descending
-        const requestsArray = Object.values(data) as ServiceRequest[]
-        requestsArray.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        // โหลดเฉพาะ 90 วันล่าสุด และ active jobs (ยังไม่ปิดงาน)
+        const requestsArray = (Object.values(data) as ServiceRequest[])
+          .filter(r => r.createdAt >= cutoff || (r.status !== 'completed' && r.status !== 'cancelled'))
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         setRequests(requestsArray)
       } else {
         setRequests([])
@@ -506,7 +509,7 @@ export default function Home() {
     }
   }
 
-  const openModal = (request?: ServiceRequest) => {
+  const openModal = useCallback((request?: ServiceRequest) => {
     if (request) {
       setEditingRequest(request)
       setFormData(request)
@@ -527,7 +530,7 @@ export default function Home() {
       })
     }
     setIsModalOpen(true)
-  }
+  }, [])
 
   const closeModal = () => {
     setIsModalOpen(false)
@@ -1039,7 +1042,7 @@ export default function Home() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {departmentRequests.map((request) => (
+                  {departmentRequests.slice(0, displayLimit).map((request) => (
                     <tr key={request.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className="px-4 py-3 align-top">
                         <div className="font-mono text-sm text-blue-600">
@@ -1114,7 +1117,7 @@ export default function Home() {
           </div>
         ) : (
           <div className="space-y-3 sm:grid sm:grid-cols-2 sm:gap-4 sm:space-y-0 lg:grid-cols-3">
-            {departmentRequests.map((request) => (
+            {departmentRequests.slice(0, displayLimit).map((request) => (
               <div key={request.id} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200">
                 <div className="flex items-start justify-between mb-2">
                   <div>
@@ -1214,6 +1217,18 @@ export default function Home() {
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Load More Button */}
+        {departmentRequests.length > displayLimit && (
+          <div className="text-center mt-4">
+            <button
+              onClick={() => setDisplayLimit(prev => prev + 50)}
+              className="px-6 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-sm font-medium transition-colors"
+            >
+              โหลดเพิ่ม ({departmentRequests.length - displayLimit} รายการที่เหลือ)
+            </button>
           </div>
         )}
       </main>
