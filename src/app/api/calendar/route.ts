@@ -1,5 +1,18 @@
 import { google } from 'googleapis'
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
+import { checkRateLimit, rateLimitResponse } from '@/lib/api-middleware'
+
+const CalendarSchema = z.object({
+  requestNo: z.string().min(1),
+  customerName: z.string().min(1).max(200),
+  phone: z.string().max(20),
+  address: z.string().max(500).optional(),
+  serviceType: z.string().max(100),
+  description: z.string().max(2000).optional(),
+  appointmentDate: z.string().min(1),
+  eventId: z.string().optional(),
+})
 
 // Initialize Google Calendar client
 async function getGoogleCalendarClient() {
@@ -15,9 +28,14 @@ async function getGoogleCalendarClient() {
 }
 
 export async function POST(request: NextRequest) {
+    if (!checkRateLimit(request)) return rateLimitResponse()
     try {
         const body = await request.json()
-        const { requestNo, customerName, phone, address, serviceType, description, appointmentDate } = body
+        const validated = CalendarSchema.safeParse(body)
+        if (!validated.success) {
+          return NextResponse.json({ error: 'Invalid request data' }, { status: 400 })
+        }
+        const { requestNo, customerName, phone, address, serviceType, description, appointmentDate } = validated.data
 
         const calendar = await getGoogleCalendarClient()
         const calendarId = process.env['GOOGLE_CALENDAR_ID']

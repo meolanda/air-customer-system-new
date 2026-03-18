@@ -1,5 +1,6 @@
 import { google } from 'googleapis'
 import { NextRequest, NextResponse } from 'next/server'
+import { checkRateLimit, rateLimitResponse } from '@/lib/api-middleware'
 
 // Initialize Google Drive client
 async function getGoogleDriveClient() {
@@ -16,6 +17,7 @@ async function getGoogleDriveClient() {
 
 // POST - Upload file to Google Drive
 export async function POST(request: NextRequest) {
+  if (!checkRateLimit(request)) return rateLimitResponse()
   try {
     const drive = await getGoogleDriveClient()
     const folderId = process.env['GOOGLE_DRIVE_FOLDER_ID']

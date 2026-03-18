@@ -1,5 +1,28 @@
 import { google } from 'googleapis'
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
+import { checkRateLimit, rateLimitResponse } from '@/lib/api-middleware'
+import { withRetry } from '@/lib/retry'
+
+const RequestSchema = z.object({
+  id: z.string().min(1),
+  requestNo: z.string().min(1),
+  createdAt: z.string(),
+  channel: z.enum(['LINE', 'โทร', 'Walk-in', 'Facebook', 'อื่นๆ']),
+  customerName: z.string().min(1).max(200),
+  phone: z.string().max(20),
+  address: z.string().max(500),
+  serviceType: z.string().max(100),
+  description: z.string().max(2000),
+  priority: z.enum(['normal', 'urgent', 'emergency']),
+  status: z.enum(['new', 'queue', 'waiting_quote', 'checking_parts', 'send_quote', 'waiting_response', 'completed', 'cancelled']),
+  appointmentDate: z.string(),
+  notes: z.string().max(500),
+  imageUrl: z.string(),
+  history: z.array(z.object({ status: z.string(), date: z.string(), by: z.string() })),
+  calendarEventId: z.string().optional(),
+  calendarEventUrl: z.string().optional(),
+})
 
 // Type definitions
 interface ServiceRequest {
@@ -106,7 +129,8 @@ function requestToArray(request: ServiceRequest): string[] {
 }
 
 // GET - Fetch all data from Google Sheets
-export async function GET() {
+export async function GET(request: NextRequest) {
+  if (!checkRateLimit(request)) return rateLimitResponse()
   try {
     const sheets = await getGoogleSheetsClient()
     const spreadsheetId = process.env['GOOGLE_SHEETS_ID']
@@ -120,15 +144,15 @@ export async function GET() {
 
     const tabName = await getSheetTabName(sheets, spreadsheetId)
 
-    const response = await sheets.spreadsheets.values.get({
+    const response = await withRetry(() => sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tabName}!A2:Q`, // Skip header row
-    })
+      range: `${tabName}!A2:Q`,
+    }))
 
-    const headerResponse = await sheets.spreadsheets.values.get({
+    const headerResponse = await withRetry(() => sheets.spreadsheets.values.get({
       spreadsheetId,
       range: `${tabName}!A1:Q1`,
-    })
+    }))
 
     const headers = headerResponse.data.values?.[0] || [
       'id', 'requestNo', 'createdAt', 'channel', 'customerName',
@@ -168,8 +192,13 @@ export async function GET() {
 
 // POST - Add new data to Google Sheets
 export async function POST(request: NextRequest) {
+  if (!checkRateLimit(request)) return rateLimitResponse()
   try {
     const body = await request.json()
+    const validated = RequestSchema.safeParse(body)
+    if (!validated.success) {
+      return NextResponse.json({ error: 'Invalid request data', details: validated.error.flatten() }, { status: 400 })
+    }
     const sheets = await getGoogleSheetsClient()
     const spreadsheetId = process.env['GOOGLE_SHEETS_ID']
 
@@ -226,6 +255,7 @@ export async function POST(request: NextRequest) {
 
 // PUT - Update data in Google Sheets
 export async function PUT(request: NextRequest) {
+  if (!checkRateLimit(request)) return rateLimitResponse()
   try {
     const body = await request.json()
     const { id, ...updateData } = body
@@ -307,6 +337,7 @@ export async function PUT(request: NextRequest) {
 
 // DELETE - Remove data from Google Sheets
 export async function DELETE(request: NextRequest) {
+  if (!checkRateLimit(request)) return rateLimitResponse()
   try {
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')

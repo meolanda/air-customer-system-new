@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { checkRateLimit, rateLimitResponse } from '@/lib/api-middleware'
 
 export async function POST(req: NextRequest) {
+    if (!checkRateLimit(req)) return rateLimitResponse()
     try {
         const { imageBase64 } = await req.json();
 

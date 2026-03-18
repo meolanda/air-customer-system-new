@@ -219,16 +219,24 @@ export default function Home() {
     XLSX.writeFile(wb, `งานบริการแอร์_${date}.xlsx`)
   }
 
-  // Handle PIN verification
-  const handlePinSubmit = () => {
-    const correctPin = process.env['NEXT_PUBLIC_STORE_PIN'] || '123456'
-    if (pinInput === correctPin) {
-      setIsAuthenticated(true)
-      sessionStorage.setItem('isAuthenticated', 'true')
-      setPinError('')
-    } else {
-      setPinError('รหัส PIN ไม่ถูกต้อง')
-      setPinInput('')
+  // Handle PIN verification (server-side)
+  const handlePinSubmit = async () => {
+    try {
+      const res = await fetch('/api/auth/verify-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: pinInput }),
+      })
+      if (res.ok) {
+        setIsAuthenticated(true)
+        sessionStorage.setItem('isAuthenticated', 'true')
+        setPinError('')
+      } else {
+        setPinError('รหัส PIN ไม่ถูกต้อง')
+        setPinInput('')
+      }
+    } catch {
+      setPinError('เกิดข้อผิดพลาด กรุณาลองใหม่')
     }
   }
 

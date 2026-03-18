@@ -1,8 +1,20 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod'
+import { checkRateLimit, rateLimitResponse } from '@/lib/api-middleware'
 
-export async function POST(request: Request) {
+const TelegramSchema = z.object({
+  message: z.string().min(1).max(4096),
+})
+
+export async function POST(request: NextRequest) {
+    if (!checkRateLimit(request)) return rateLimitResponse()
     try {
-        const { message } = await request.json();
+        const body = await request.json()
+        const validated = TelegramSchema.safeParse(body)
+        if (!validated.success) {
+          return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+        }
+        const { message } = validated.data
 
         // We will store these in .env.local shortly
         const TELEGRAM_BOT_TOKEN = process.env['TELEGRAM_BOT_TOKEN'];
