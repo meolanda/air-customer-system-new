@@ -272,10 +272,18 @@ export default function Home() {
           async () => {
             try {
               const downloadURL = await getDownloadURL(uploadTask.snapshot.ref)
-              // Backup to Google Drive in background (ไม่รอผล ไม่กระทบ UX)
-              const formData = new FormData()
-              formData.append('file', file, fileName)
-              fetch('/api/upload', { method: 'POST', body: formData }).catch(() => {})
+              // Backup to Google Drive (รอผล เพื่อให้เห็น error)
+              try {
+                const driveForm = new FormData()
+                driveForm.append('file', file, fileName)
+                const driveRes = await fetch('/api/upload', { method: 'POST', body: driveForm })
+                if (!driveRes.ok) {
+                  const errText = await driveRes.text()
+                  console.warn('Drive backup failed:', driveRes.status, errText)
+                }
+              } catch (driveErr) {
+                console.warn('Drive backup error:', driveErr)
+              }
               resolve(downloadURL)
             } catch (err) {
               console.error('Error getting download URL:', err)
