@@ -22,7 +22,7 @@ interface ServiceRequest {
   calendarEventUrl?: string
 }
 
-// Initialize Google Sheets client
+// Initialize Google Sheets client and detect actual sheet tab name
 async function getGoogleSheetsClient() {
   const auth = new google.auth.GoogleAuth({
     credentials: {
@@ -33,6 +33,16 @@ async function getGoogleSheetsClient() {
   })
 
   return google.sheets({ version: 'v4', auth })
+}
+
+// Get the actual first sheet tab name (handles Thai locale 'แผ่น1' vs 'Sheet1')
+async function getSheetTabName(sheets: ReturnType<typeof google.sheets>, spreadsheetId: string): Promise<string> {
+  const configuredName = process.env['GOOGLE_SHEETS_TAB_NAME']
+  if (configuredName) return configuredName
+
+  const meta = await sheets.spreadsheets.get({ spreadsheetId })
+  const firstName = meta.data.sheets?.[0]?.properties?.title
+  return firstName || 'Sheet1'
 }
 
 // Convert array to ServiceRequest object
@@ -108,14 +118,16 @@ export async function GET() {
       )
     }
 
+    const tabName = await getSheetTabName(sheets, spreadsheetId)
+
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'งานบริการ!A2:Q', // Skip header row
+      range: `${tabName}!A2:Q`, // Skip header row
     })
 
     const headerResponse = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'งานบริการ!A1:Q1',
+      range: `${tabName}!A1:Q1`,
     })
 
     const headers = headerResponse.data.values?.[0] || [
@@ -168,6 +180,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const tabName = await getSheetTabName(sheets, spreadsheetId)
+
     const newRequest: ServiceRequest = {
       id: body.id || Date.now().toString(),
       requestNo: body.requestNo || '',
@@ -192,7 +206,7 @@ export async function POST(request: NextRequest) {
 
     await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: 'งานบริการ!A:Q',
+      range: `${tabName}!A:Q`,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [row],
@@ -225,10 +239,12 @@ export async function PUT(request: NextRequest) {
       )
     }
 
+    const tabName = await getSheetTabName(sheets, spreadsheetId)
+
     // Find the row with matching id
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'งานบริการ!A:A',
+      range: `${tabName}!A:A`,
     })
 
     const rows = response.data.values || []
@@ -249,7 +265,7 @@ export async function PUT(request: NextRequest) {
     // Get existing data
     const existingResponse = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `งานบริการ!A${rowIndex}:Q${rowIndex}`,
+      range: `${tabName}!A${rowIndex}:Q${rowIndex}`,
     })
 
     const existingRow = existingResponse.data.values?.[0] || []
@@ -271,7 +287,7 @@ export async function PUT(request: NextRequest) {
 
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `งานบริการ!A${rowIndex}:Q${rowIndex}`,
+      range: `${tabName}!A${rowIndex}:Q${rowIndex}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [updatedRow],
@@ -309,10 +325,12 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
+    const tabName = await getSheetTabName(sheets, spreadsheetId)
+
     // Find the row with matching id
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'งานบริการ!A:A',
+      range: `${tabName}!A:A`,
     })
 
     const rows = response.data.values || []
@@ -357,3 +375,4 @@ export async function DELETE(request: NextRequest) {
     )
   }
 }
+
