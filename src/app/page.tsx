@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
+import * as XLSX from 'xlsx'
 import { ref, onValue, set, update, remove } from 'firebase/database'
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../lib/firebase'
@@ -54,6 +55,9 @@ const STATUS_CONFIG: Record<Status, { label: string; icon: string; color: string
   completed: { label: 'เสร็จสิ้น', icon: '🏁', color: 'bg-gray-500' },
   cancelled: { label: 'ยกเลิก', icon: '❌', color: 'bg-red-500' }
 }
+
+const getStatusConfig = (status: string) =>
+  STATUS_CONFIG[status as Status] ?? { label: status, icon: '❓', color: 'bg-slate-400' }
 
 // Status transitions
 const STATUS_TRANSITIONS: Record<Status, Status[]> = {
@@ -185,6 +189,33 @@ export default function Home() {
     sessionStorage.removeItem('isAuthenticated')
   }
 
+  const handleExportExcel = () => {
+    const STATUS_LABEL: Record<string, string> = {
+      new: 'รับเรื่องใหม่', queue: 'จองคิว/นัดหมาย', waiting_quote: 'ขอใบเสนอราคา',
+      checking_parts: 'เช็คอะไหล่+เสนอราคา', send_quote: 'ส่งใบเสนอราคาแล้ว',
+      waiting_response: 'รอลูกค้าตอบกลับ', completed: 'เสร็จสิ้น', cancelled: 'ยกเลิก'
+    }
+    const rows = requests.map(r => ({
+      'เลขที่งาน': r.requestNo,
+      'วันที่รับเรื่อง': r.createdAt ? new Date(r.createdAt).toLocaleDateString('th-TH') : '',
+      'ช่องทาง': r.channel,
+      'ชื่อลูกค้า': r.customerName,
+      'เบอร์โทร': r.phone,
+      'ที่อยู่': r.address,
+      'ประเภทงาน': r.serviceType,
+      'รายละเอียด': r.description,
+      'ความเร่งด่วน': r.priority === 'urgent' ? 'ด่วน' : r.priority === 'emergency' ? 'ฉุกเฉิน' : 'ปกติ',
+      'สถานะ': STATUS_LABEL[r.status] || r.status,
+      'วันนัดหมาย': r.appointmentDate ? new Date(r.appointmentDate).toLocaleDateString('th-TH') : '',
+      'หมายเหตุ': r.notes,
+    }))
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'งานบริการแอร์')
+    const date = new Date().toLocaleDateString('th-TH').replace(/\//g, '-')
+    XLSX.writeFile(wb, `งานบริการแอร์_${date}.xlsx`)
+  }
+
   // Handle PIN verification
   const handlePinSubmit = () => {
     const correctPin = process.env['NEXT_PUBLIC_STORE_PIN'] || '123456'
@@ -283,7 +314,7 @@ export default function Home() {
   // Telegram Notification Helper
   const sendTelegramNotification = async (requestData: ServiceRequest, action: 'NEW' | 'UPDATE') => {
     try {
-      const statusText = STATUS_CONFIG[requestData.status].label
+      const statusText = getStatusConfig(requestData.status).label
       const priorityText = requestData.priority === 'urgent' ? '🟡 เร่งด่วน' : requestData.priority === 'emergency' ? '🔴 ฉุกเฉิน' : 'ปกติ'
 
       let message = `<b>🔔 แจ้งเตือน: ${action === 'NEW' ? 'งานใหม่เข้า' : 'อัปเดตสถานะงาน'}</b>\n\n`
@@ -901,6 +932,13 @@ export default function Home() {
                 <span>+</span> เพิ่มงาน
               </button>
               <button
+                onClick={handleExportExcel}
+                className="bg-green-500 hover:bg-green-600 text-white px-3 py-2 rounded-xl text-sm font-medium"
+                title="Export Excel"
+              >
+                📥 Excel
+              </button>
+              <button
                 onClick={handleLogout}
                 className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-xl text-sm"
               >
@@ -1024,8 +1062,8 @@ export default function Home() {
                         )}
                       </td>
                       <td className="px-4 py-3 align-top whitespace-nowrap">
-                        <span className={`px-2 py-1 rounded-lg text-xs font-medium text-white ${STATUS_CONFIG[request.status].color}`}>
-                          {STATUS_CONFIG[request.status].icon} {STATUS_CONFIG[request.status].label}
+                        <span className={`px-2 py-1 rounded-lg text-xs font-medium text-white ${getStatusConfig(request.status).color}`}>
+                          {getStatusConfig(request.status).icon} {getStatusConfig(request.status).label}
                         </span>
                         {/* Quick Status Change */}
                         {STATUS_TRANSITIONS[request.status].length > 0 && (
@@ -1036,10 +1074,10 @@ export default function Home() {
                             <button
                               key={nextStatus}
                               onClick={() => updateStatus(request.id, nextStatus)}
-                              className={`px-1.5 py-0.5 rounded border text-[10px] font-medium transition-all ${STATUS_CONFIG[nextStatus].color.replace('bg-', 'text-').replace('500', '600')} bg-white hover:bg-slate-50`}
-                              title={STATUS_CONFIG[nextStatus].label}
+                              className={`px-1.5 py-0.5 rounded border text-[10px] font-medium transition-all ${getStatusConfig(nextStatus).color.replace('bg-', 'text-').replace('500', '600')} bg-white hover:bg-slate-50`}
+                              title={getStatusConfig(nextStatus).label}
                             >
-                              {STATUS_CONFIG[nextStatus].icon}
+                              {getStatusConfig(nextStatus).icon}
                             </button>
                           ))}
                         </div>
@@ -1084,8 +1122,8 @@ export default function Home() {
                     <span className="mx-2 text-slate-300">|</span>
                     <span className="text-xs text-slate-500">{formatDate(request.createdAt)}</span>
                   </div>
-                  <span className={`px-2 py-1 rounded-lg text-xs font-medium text-white ${STATUS_CONFIG[request.status].color}`}>
-                    {STATUS_CONFIG[request.status].icon} {STATUS_CONFIG[request.status].label}
+                  <span className={`px-2 py-1 rounded-lg text-xs font-medium text-white ${getStatusConfig(request.status).color}`}>
+                    {getStatusConfig(request.status).icon} {getStatusConfig(request.status).label}
                   </span>
                 </div>
 
@@ -1134,9 +1172,9 @@ export default function Home() {
                     <button
                       key={nextStatus}
                       onClick={() => updateStatus(request.id, nextStatus)}
-                      className={`px-3 py-2 rounded-xl text-xs font-medium text-white ${STATUS_CONFIG[nextStatus].color} hover:opacity-90 transition-all`}
+                      className={`px-3 py-2 rounded-xl text-xs font-medium text-white ${getStatusConfig(nextStatus).color} hover:opacity-90 transition-all`}
                     >
-                      {STATUS_CONFIG[nextStatus].icon} {STATUS_CONFIG[nextStatus].label}
+                      {getStatusConfig(nextStatus).icon} {getStatusConfig(nextStatus).label}
                     </button>
                   ))}
 
@@ -1162,7 +1200,7 @@ export default function Home() {
                     <div className="flex flex-wrap gap-1">
                       {request.history.map((h, i) => (
                         <span key={i} className="text-xs bg-slate-50 px-2 py-0.5 rounded text-slate-500">
-                          {STATUS_CONFIG[h.status].icon} {h.status === 'new' ? 'เริ่มต้น' : STATUS_CONFIG[h.status].label}
+                          {getStatusConfig(h.status).icon} {h.status === 'new' ? 'เริ่มต้น' : getStatusConfig(h.status).label}
                         </span>
                       ))}
                     </div>
@@ -1513,13 +1551,56 @@ export default function Home() {
 
               {/* Appointment Date */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">วันที่นัดหมาย (ถ้ามี)</label>
-                <input
-                  type="datetime-local"
-                  value={formData.appointmentDate || ''}
-                  onChange={(e) => setFormData(prev => ({ ...prev, appointmentDate: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-xl text-sm"
-                />
+                <label className="block text-sm font-medium text-slate-700 mb-2">วันที่นัดหมาย (ถ้ามี)</label>
+                <div className="flex items-center gap-2">
+                  {/* Date */}
+                  <input
+                    type="date"
+                    value={formData.appointmentDate ? formData.appointmentDate.slice(0, 10) : ''}
+                    onChange={(e) => {
+                      const datePart = e.target.value
+                      const hh = formData.appointmentDate ? formData.appointmentDate.slice(11, 13) : '09'
+                      const mm = formData.appointmentDate ? formData.appointmentDate.slice(14, 16) : '00'
+                      setFormData(prev => ({ ...prev, appointmentDate: datePart ? `${datePart}T${hh}:${mm}` : '' }))
+                    }}
+                    className="flex-1 px-3 py-2 border rounded-xl text-sm"
+                  />
+                  <span className="text-slate-500 text-sm whitespace-nowrap">เวลา</span>
+                  {/* Hour */}
+                  <input
+                    type="number"
+                    min={0}
+                    max={23}
+                    placeholder="ชม."
+                    value={formData.appointmentDate ? parseInt(formData.appointmentDate.slice(11, 13) || '9') : ''}
+                    onChange={(e) => {
+                      const raw = parseInt(e.target.value)
+                      const hh = (isNaN(raw) ? 0 : Math.max(0, Math.min(23, raw))).toString().padStart(2, '0')
+                      const datePart = formData.appointmentDate ? formData.appointmentDate.slice(0, 10) : new Date().toISOString().slice(0, 10)
+                      const mm = formData.appointmentDate ? formData.appointmentDate.slice(14, 16) : '00'
+                      setFormData(prev => ({ ...prev, appointmentDate: `${datePart}T${hh}:${mm}` }))
+                    }}
+                    className="w-14 px-2 py-2 border rounded-xl text-sm text-center"
+                  />
+                  <span className="text-slate-600 font-bold">:</span>
+                  {/* Minute */}
+                  <input
+                    type="number"
+                    min={0}
+                    max={59}
+                    placeholder="นาที"
+                    value={formData.appointmentDate ? parseInt(formData.appointmentDate.slice(14, 16) || '0') : ''}
+                    onChange={(e) => {
+                      const raw = parseInt(e.target.value)
+                      const mm = (isNaN(raw) ? 0 : Math.max(0, Math.min(59, raw))).toString().padStart(2, '0')
+                      const datePart = formData.appointmentDate ? formData.appointmentDate.slice(0, 10) : new Date().toISOString().slice(0, 10)
+                      const hh = formData.appointmentDate ? formData.appointmentDate.slice(11, 13) : '09'
+                      setFormData(prev => ({ ...prev, appointmentDate: `${datePart}T${hh}:${mm}` }))
+                    }}
+                    className="w-14 px-2 py-2 border rounded-xl text-sm text-center"
+                  />
+                  <span className="text-slate-600 text-sm">น.</span>
+                </div>
               </div>
 
               {/* Status */}
