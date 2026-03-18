@@ -237,7 +237,7 @@ export default function Home() {
     return `REQ-${dateStr}-${count.toString().padStart(3, '0')}`
   }
 
-  // Upload image to Firebase Storage
+  // Upload image to Firebase Storage + backup to Google Drive
   const uploadImage = async (file: File): Promise<string | null> => {
     try {
       setUploadProgress(0)
@@ -261,6 +261,10 @@ export default function Home() {
           async () => {
             try {
               const downloadURL = await getDownloadURL(uploadTask.snapshot.ref)
+              // Backup to Google Drive in background (ไม่รอผล ไม่กระทบ UX)
+              const formData = new FormData()
+              formData.append('file', file, fileName)
+              fetch('/api/upload', { method: 'POST', body: formData }).catch(() => {})
               resolve(downloadURL)
             } catch (err) {
               console.error('Error getting download URL:', err)

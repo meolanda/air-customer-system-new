@@ -1,0 +1,4 @@
+download/
+.claude/
+node_modules/
+.next/
