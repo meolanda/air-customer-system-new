@@ -18,7 +18,8 @@ interface ServiceRequest {
   requestNo: string
   createdAt: string
   channel: 'LINE' | 'โทร' | 'Walk-in' | 'Facebook' | 'อื่นๆ'
-  customerName: string
+  customerName: string   // ชื่อร้าน/สาขา
+  contactName?: string   // ผู้ติดต่อ (optional)
   phone: string
   address: string
   serviceType: string
@@ -108,6 +109,7 @@ export default function Home() {
   const [formData, setFormData] = useState<Partial<ServiceRequest>>({
     channel: 'LINE',
     customerName: '',
+    contactName: '',
     phone: '',
     address: '',
     serviceType: 'ล้างแอร์',
@@ -203,7 +205,8 @@ export default function Home() {
       'เลขที่งาน': r.requestNo,
       'วันที่รับเรื่อง': r.createdAt ? new Date(r.createdAt).toLocaleDateString('th-TH') : '',
       'ช่องทาง': r.channel,
-      'ชื่อลูกค้า': r.customerName,
+      'ชื่อร้าน/สาขา': r.customerName,
+      'ผู้ติดต่อ': r.contactName || '',
       'เบอร์โทร': r.phone,
       'ที่อยู่': r.address,
       'ประเภทงาน': r.serviceType,
@@ -375,7 +378,7 @@ export default function Home() {
   // Handle form
   const handleSubmit = async () => {
     if (!formData.customerName || !formData.phone || !formData.address) {
-      alert('กรุณากรอกชื่อลูกค้า, เบอร์โทร และที่อยู่ (เป็นช่องบังคับ)')
+      alert('กรุณากรอกชื่อร้าน/สาขา, เบอร์โทร และที่อยู่ (เป็นช่องบังคับ)')
       return
     }
 
@@ -546,6 +549,7 @@ export default function Home() {
       setFormData({
         channel: 'LINE',
         customerName: '',
+        contactName: '',
         phone: '',
         address: '',
         serviceType: 'ล้างแอร์',
@@ -1086,6 +1090,7 @@ export default function Home() {
                       </td>
                       <td className="px-4 py-3 align-top">
                         <div className="font-medium text-slate-800 text-sm whitespace-nowrap">{request.customerName}</div>
+                        {request.contactName && <div className="text-xs text-blue-600">👤 {request.contactName}</div>}
                         <div className="text-xs text-slate-500">{request.phone}</div>
                         {request.address && <div className="text-xs text-slate-400 mt-1 truncate max-w-[200px]" title={request.address}>📍 {request.address}</div>}
                       </td>
@@ -1168,6 +1173,7 @@ export default function Home() {
 
                 <div className="mb-3">
                   <div className="font-semibold text-slate-800">{request.customerName}</div>
+                  {request.contactName && <div className="text-xs text-blue-600">👤 {request.contactName}</div>}
                   <div className="text-sm text-slate-500">{request.phone}</div>
                   {request.address && <div className="text-xs text-slate-400 mt-1">📍 {request.address}</div>}
                 </div>
@@ -1464,14 +1470,24 @@ export default function Home() {
 
               {/* Name & Phone */}
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">ชื่อลูกค้า *</label>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">ชื่อร้าน / สาขา *</label>
                   <input
                     type="text"
                     value={formData.customerName || ''}
                     onChange={(e) => setFormData(prev => ({ ...prev, customerName: e.target.value }))}
                     className="w-full px-3 py-2 border rounded-xl text-sm"
-                    placeholder="ชื่อ-นามสกุล"
+                    placeholder="เช่น KFC สาขาสีลม, ที.เอส มอเตอร์"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">ผู้ติดต่อ</label>
+                  <input
+                    type="text"
+                    value={formData.contactName || ''}
+                    onChange={(e) => setFormData(prev => ({ ...prev, contactName: e.target.value }))}
+                    className="w-full px-3 py-2 border rounded-xl text-sm"
+                    placeholder="ชื่อผู้ติดต่อ (ถ้ามี)"
                   />
                 </div>
                 <div>
