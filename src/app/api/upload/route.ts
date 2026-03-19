@@ -81,6 +81,7 @@ export async function POST(request: NextRequest) {
         mimeType: file.type,
         body: readable,
       },
+      supportsAllDrives: true,
       fields: 'id, name, webViewLink',
     })
 
@@ -89,6 +90,7 @@ export async function POST(request: NextRequest) {
     // Make the file publicly accessible
     await drive.permissions.create({
       fileId: fileId!,
+      supportsAllDrives: true,
       requestBody: {
         role: 'reader',
         type: 'anyone',
