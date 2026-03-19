@@ -155,12 +155,12 @@ export async function GET(request: NextRequest) {
 
     const response = await withRetry(() => sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tabName}!A2:Q`,
+      range: `${tabName}!A2:R`,
     }))
 
     const headerResponse = await withRetry(() => sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tabName}!A1:Q1`,
+      range: `${tabName}!A1:R1`,
     }))
 
     const headers = headerResponse.data.values?.[0] || [
@@ -244,7 +244,7 @@ export async function POST(request: NextRequest) {
 
     await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: `${tabName}!A:Q`,
+      range: `${tabName}!A:R`,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [row],
@@ -304,7 +304,7 @@ export async function PUT(request: NextRequest) {
     // Get existing data
     const existingResponse = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: `${tabName}!A${rowIndex}:Q${rowIndex}`,
+      range: `${tabName}!A${rowIndex}:R${rowIndex}`,
     })
 
     const existingRow = existingResponse.data.values?.[0] || []
@@ -326,7 +326,7 @@ export async function PUT(request: NextRequest) {
 
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `${tabName}!A${rowIndex}:Q${rowIndex}`,
+      range: `${tabName}!A${rowIndex}:R${rowIndex}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values: [updatedRow],
