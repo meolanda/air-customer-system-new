@@ -253,14 +253,10 @@ export default function Home() {
   // Backup รูปไป Google Drive (เรียกตอน submit เพื่อให้ได้ชื่อลูกค้า+สาขา)
   const backupToDrive = async (file: File, customerName: string, address: string) => {
     try {
-      const timestamp = Date.now()
-      const ext = file.name.split('.').pop() || 'jpg'
-      const safeName = customerName.replace(/[^a-zA-Z0-9ก-๙]/g, '_') || 'ลูกค้า'
-      const safeAddress = address.replace(/[^a-zA-Z0-9ก-๙]/g, '_')
-      const fileName = safeAddress ? `${timestamp}_${safeName}_${safeAddress}.${ext}` : `${timestamp}_${safeName}.${ext}`
       const driveForm = new FormData()
-      driveForm.append('file', file, fileName)
-      const driveRes = await fetch('/api/upload', { method: 'POST', body: driveForm })
+      driveForm.append('file', file)
+      const params = new URLSearchParams({ customerName, address })
+      const driveRes = await fetch(`/api/upload?${params}`, { method: 'POST', body: driveForm })
       if (!driveRes.ok) {
         const errText = await driveRes.text()
         console.warn('Drive backup failed:', driveRes.status, errText)

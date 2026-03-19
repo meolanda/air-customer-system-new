@@ -64,10 +64,17 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
 
-    // Generate unique filename
+    // Generate unique filename with customer name + address
+    const { searchParams } = new URL(request.url)
+    const customerName = searchParams.get('customerName') || ''
+    const address = searchParams.get('address') || ''
     const timestamp = Date.now()
-    const originalName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
-    const fileName = `${timestamp}_${originalName}`
+    const ext = file.name.split('.').pop() || 'jpg'
+    const safeName = customerName.replace(/[^\w\u0E00-\u0E7F]/g, '_') || 'ลูกค้า'
+    const safeAddress = address.replace(/[^\w\u0E00-\u0E7F]/g, '_')
+    const fileName = safeAddress
+      ? `${timestamp}_${safeName}_${safeAddress}.${ext}`
+      : `${timestamp}_${safeName}.${ext}`
 
     // Upload to Google Drive (ต้องใช้ Readable stream ไม่ใช่ Buffer)
     const readable = Readable.from(buffer)
