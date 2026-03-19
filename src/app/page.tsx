@@ -249,11 +249,13 @@ export default function Home() {
   }
 
   // Upload image to Firebase Storage + backup to Google Drive
-  const uploadImage = async (file: File): Promise<string | null> => {
+  const uploadImage = async (file: File, customerName?: string): Promise<string | null> => {
     try {
       setUploadProgress(0)
       const timestamp = Date.now()
-      const fileName = `${timestamp}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
+      const ext = file.name.split('.').pop() || 'jpg'
+      const safeName = customerName ? customerName.replace(/[^a-zA-Z0-9ก-๙]/g, '_') : 'ลูกค้า'
+      const fileName = `${timestamp}_${safeName}.${ext}`
       const fileRef = storageRef(storage, `job_images/${fileName}`)
 
       const uploadTask = uploadBytesResumable(fileRef, file)
@@ -656,7 +658,7 @@ export default function Home() {
     const file = e.target.files?.[0]
     if (!file) return
 
-    const url = await uploadImage(file)
+    const url = await uploadImage(file, formData.customerName)
     if (url) {
       setFormData(prev => ({ ...prev, imageUrl: url }))
     } else {
