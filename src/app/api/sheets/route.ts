@@ -10,6 +10,7 @@ const RequestSchema = z.object({
   createdAt: z.string(),
   channel: z.enum(['LINE', 'โทร', 'Walk-in', 'Facebook', 'อื่นๆ']),
   customerName: z.string().min(1).max(200),
+  contactName: z.string().max(200).optional(),
   phone: z.string().max(20),
   address: z.string().max(500),
   serviceType: z.string().max(100),
@@ -31,6 +32,7 @@ interface ServiceRequest {
   createdAt: string
   channel: 'LINE' | 'โทร' | 'Walk-in' | 'Facebook' | 'อื่นๆ'
   customerName: string
+  contactName?: string
   phone: string
   address: string
   serviceType: string
@@ -95,6 +97,7 @@ function arrayToRequest(row: string[], headers: string[]): ServiceRequest {
     createdAt: obj['createdAt'] || '',
     channel: obj['channel'] as ServiceRequest['channel'] || 'LINE',
     customerName: obj['customerName'] || '',
+    contactName: obj['contactName'] || '',
     phone: obj['phone'] || '',
     address: obj['address'] || '',
     serviceType: obj['serviceType'] || '',
@@ -118,6 +121,7 @@ function requestToArray(request: ServiceRequest): string[] {
     request.createdAt,
     request.channel,
     request.customerName,
+    request.contactName || '',
     request.phone,
     request.address,
     request.serviceType,
@@ -160,7 +164,7 @@ export async function GET(request: NextRequest) {
     }))
 
     const headers = headerResponse.data.values?.[0] || [
-      'id', 'requestNo', 'createdAt', 'channel', 'customerName',
+      'id', 'requestNo', 'createdAt', 'channel', 'customerName', 'contactName',
       'phone', 'address', 'serviceType', 'description', 'priority',
       'status', 'appointmentDate', 'notes', 'imageUrl', 'history',
       'calendarEventId', 'calendarEventUrl'
@@ -304,7 +308,7 @@ export async function PUT(request: NextRequest) {
     })
 
     const existingRow = existingResponse.data.values?.[0] || []
-    const headers = ['id', 'requestNo', 'createdAt', 'channel', 'customerName',
+    const headers = ['id', 'requestNo', 'createdAt', 'channel', 'customerName', 'contactName',
       'phone', 'address', 'serviceType', 'description', 'priority',
       'status', 'appointmentDate', 'notes', 'imageUrl', 'history',
       'calendarEventId', 'calendarEventUrl']
