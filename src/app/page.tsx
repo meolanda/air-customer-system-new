@@ -82,6 +82,7 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [pendingDriveFile, setPendingDriveFile] = useState<File | null>(null)
   const [viewMode, setViewMode] = useState<'card' | 'table'>('card')
   const [displayLimit, setDisplayLimit] = useState(50)
 
@@ -249,14 +250,32 @@ export default function Home() {
   }
 
   // Upload image to Firebase Storage + backup to Google Drive
-  const uploadImage = async (file: File, customerName?: string, address?: string): Promise<string | null> => {
+  // Backup รูปไป Google Drive (เรียกตอน submit เพื่อให้ได้ชื่อลูกค้า+สาขา)
+  const backupToDrive = async (file: File, customerName: string, address: string) => {
+    try {
+      const timestamp = Date.now()
+      const ext = file.name.split('.').pop() || 'jpg'
+      const safeName = customerName.replace(/[^a-zA-Z0-9ก-๙]/g, '_') || 'ลูกค้า'
+      const safeAddress = address.replace(/[^a-zA-Z0-9ก-๙]/g, '_')
+      const fileName = safeAddress ? `${timestamp}_${safeName}_${safeAddress}.${ext}` : `${timestamp}_${safeName}.${ext}`
+      const driveForm = new FormData()
+      driveForm.append('file', file, fileName)
+      const driveRes = await fetch('/api/upload', { method: 'POST', body: driveForm })
+      if (!driveRes.ok) {
+        const errText = await driveRes.text()
+        console.warn('Drive backup failed:', driveRes.status, errText)
+      }
+    } catch (driveErr) {
+      console.warn('Drive backup error:', driveErr)
+    }
+  }
+
+  const uploadImage = async (file: File): Promise<string | null> => {
     try {
       setUploadProgress(0)
       const timestamp = Date.now()
       const ext = file.name.split('.').pop() || 'jpg'
-      const safeName = customerName ? customerName.replace(/[^a-zA-Z0-9ก-๙]/g, '_') : 'ลูกค้า'
-      const safeAddress = address ? address.replace(/[^a-zA-Z0-9ก-๙]/g, '_') : ''
-      const fileName = safeAddress ? `${timestamp}_${safeName}_${safeAddress}.${ext}` : `${timestamp}_${safeName}.${ext}`
+      const fileName = `${timestamp}.${ext}`
       const fileRef = storageRef(storage, `job_images/${fileName}`)
 
       const uploadTask = uploadBytesResumable(fileRef, file)
@@ -275,18 +294,6 @@ export default function Home() {
           async () => {
             try {
               const downloadURL = await getDownloadURL(uploadTask.snapshot.ref)
-              // Backup to Google Drive (รอผล เพื่อให้เห็น error)
-              try {
-                const driveForm = new FormData()
-                driveForm.append('file', file, fileName)
-                const driveRes = await fetch('/api/upload', { method: 'POST', body: driveForm })
-                if (!driveRes.ok) {
-                  const errText = await driveRes.text()
-                  console.warn('Drive backup failed:', driveRes.status, errText)
-                }
-              } catch (driveErr) {
-                console.warn('Drive backup error:', driveErr)
-              }
               resolve(downloadURL)
             } catch (err) {
               console.error('Error getting download URL:', err)
@@ -374,6 +381,12 @@ export default function Home() {
     if (!formData.customerName || !formData.phone || !formData.address) {
       alert('กรุณากรอกชื่อลูกค้า, เบอร์โทร และที่อยู่ (เป็นช่องบังคับ)')
       return
+    }
+
+    // Backup รูปไป Drive พร้อมชื่อลูกค้า+สาขา
+    if (pendingDriveFile) {
+      backupToDrive(pendingDriveFile, formData.customerName, formData.address)
+      setPendingDriveFile(null)
     }
 
     setIsSaving(true)
@@ -555,6 +568,7 @@ export default function Home() {
     setIsModalOpen(false)
     setEditingRequest(null)
     setUploadProgress(null)
+    setPendingDriveFile(null)
   }
 
   const updateStatus = async (id: string, newStatus: Status) => {
@@ -659,7 +673,8 @@ export default function Home() {
     const file = e.target.files?.[0]
     if (!file) return
 
-    const url = await uploadImage(file, formData.customerName, formData.address)
+    setPendingDriveFile(file)
+    const url = await uploadImage(file)
     if (url) {
       setFormData(prev => ({ ...prev, imageUrl: url }))
     } else {
