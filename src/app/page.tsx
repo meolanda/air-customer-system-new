@@ -700,6 +700,7 @@ export default function Home() {
         setFormData(prev => ({
           ...prev,
           customerName: result.data.customerName || prev.customerName,
+          contactName: result.data.contactName || prev.contactName,
           phone: result.data.phone || prev.phone,
           address: result.data.address || prev.address,
           serviceType: result.data.serviceType || prev.serviceType,
@@ -749,7 +750,8 @@ export default function Home() {
       if (result.success && result.data) {
         setFormData(prev => ({
           ...prev,
-          customerName: result.data.customerName || prev.customerName,
+          customerName: result.data.shopName || result.data.customerName || prev.customerName,
+          contactName: result.data.contactName || prev.contactName,
           phone: result.data.phone || prev.phone,
           address: result.data.address || prev.address,
           serviceType: result.data.serviceType || prev.serviceType,
