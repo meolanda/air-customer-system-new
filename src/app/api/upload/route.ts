@@ -1,5 +1,6 @@
 import { google } from 'googleapis'
 import { NextRequest, NextResponse } from 'next/server'
+import { Readable } from 'stream'
 import { checkRateLimit, rateLimitResponse } from '@/lib/api-middleware'
 
 // Initialize Google Drive client
@@ -68,7 +69,8 @@ export async function POST(request: NextRequest) {
     const originalName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
     const fileName = `${timestamp}_${originalName}`
 
-    // Upload to Google Drive
+    // Upload to Google Drive (ต้องใช้ Readable stream ไม่ใช่ Buffer)
+    const readable = Readable.from(buffer)
     const response = await drive.files.create({
       requestBody: {
         name: fileName,
@@ -77,7 +79,7 @@ export async function POST(request: NextRequest) {
       },
       media: {
         mimeType: file.type,
-        body: buffer,
+        body: readable,
       },
       fields: 'id, name, webViewLink',
     })
