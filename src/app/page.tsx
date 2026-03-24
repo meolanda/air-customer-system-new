@@ -92,7 +92,7 @@ export default function Home() {
   // AI State
   const [isAiLoading, setIsAiLoading] = useState(false)
   const [aiText, setAiText] = useState('')
-  const [activeAiTab, setActiveAiTab] = useState<'text' | 'image' | 'voice' | null>(null)
+  const [activeAiTab, setActiveAiTab] = useState<'text' | 'image' | 'voice' | 'pdf' | null>(null)
 
   // AI Image State
   const [aiImageBase64, setAiImageBase64] = useState<string>('')
@@ -773,6 +773,7 @@ export default function Home() {
           serviceType: d.serviceType || prev.serviceType,
           description: d.description || prev.description
         }))
+        setActiveAiTab(null)
         alert('AI อ่าน PDF สำเร็จ! ข้อมูลถูกกรอกแล้ว')
       } else {
         alert('AI อ่าน PDF ไม่สำเร็จ: ' + (result.error || 'เกิดข้อผิดพลาด'))
@@ -1422,7 +1423,7 @@ export default function Home() {
                 </div>
 
                 {!activeAiTab ? (
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-4 gap-2">
                     <button
                       onClick={() => setActiveAiTab('text')}
                       className="bg-white hover:bg-indigo-50 text-indigo-600 py-2 rounded-lg text-xs font-medium border border-indigo-100 transition-colors flex flex-col items-center gap-1"
@@ -1443,6 +1444,13 @@ export default function Home() {
                     >
                       <span className="text-lg">🎙️</span>
                       พูดสั่งงาน
+                    </button>
+                    <button
+                      onClick={() => setActiveAiTab('pdf')}
+                      className="bg-white hover:bg-indigo-50 text-indigo-600 py-2 rounded-lg text-xs font-medium border border-indigo-100 transition-colors flex flex-col items-center gap-1"
+                    >
+                      <span className="text-lg">📄</span>
+                      อ่าน PDF
                     </button>
                   </div>
                 ) : (
@@ -1520,6 +1528,58 @@ export default function Home() {
                         </button>
                       </div>
                     )}
+                    {activeAiTab === 'pdf' && (
+                      <div className="space-y-2">
+                        {formData.pdfUrl ? (
+                          <div className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
+                            <span className="text-xl">📄</span>
+                            <span className="text-xs text-slate-600 truncate flex-1">{formData.pdfFileName || 'ไฟล์ PDF'}</span>
+                          </div>
+                        ) : (
+                          <div className="border-2 border-dashed border-indigo-200 rounded-lg p-3 text-center">
+                            <input
+                              type="file"
+                              accept="application/pdf,.pdf"
+                              onChange={handlePdfUpload}
+                              className="hidden"
+                              id="ai-pdf-upload"
+                            />
+                            <label htmlFor="ai-pdf-upload" className="cursor-pointer">
+                              {isPdfUploading ? (
+                                <div className="flex flex-col items-center gap-1">
+                                  <div className="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                                  <p className="text-xs text-slate-500">กำลังอัปโหลด...</p>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="text-2xl mb-1">📎</div>
+                                  <p className="text-xs text-indigo-600 font-medium">คลิกเลือกไฟล์ PDF</p>
+                                  <p className="text-xs text-slate-400">สูงสุด 20MB</p>
+                                </>
+                              )}
+                            </label>
+                          </div>
+                        )}
+                        <button
+                          onClick={handlePdfAnalyze}
+                          disabled={!pdfBase64 || isPdfAnalyzing}
+                          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {isPdfAnalyzing ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                              AI กำลังอ่าน PDF...
+                            </>
+                          ) : (
+                            '🤖 ให้ AI อ่านและกรอกข้อมูล'
+                          )}
+                        </button>
+                        {!pdfBase64 && !formData.pdfUrl && (
+                          <p className="text-xs text-slate-400 text-center">อัปโหลด PDF ก่อน แล้วกด AI อ่าน</p>
+                        )}
+                      </div>
+                    )}
+
                     {activeAiTab === 'voice' && (
                       <div className="space-y-2">
                         <button
