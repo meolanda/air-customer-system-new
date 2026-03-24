@@ -42,20 +42,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate file type (images only)
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
-    if (!allowedTypes.includes(file.type)) {
+    // Validate file type (images + PDF)
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf']
+    if (!allowedTypes.includes(file.type) && !file.name.match(/\.(pdf|jpg|jpeg|png|gif|webp)$/i)) {
       return NextResponse.json(
-        { error: 'Invalid file type. Only images are allowed.' },
+        { error: 'Invalid file type. Only images and PDF are allowed.' },
         { status: 400 }
       )
     }
 
-    // Validate file size (max 10MB)
-    const maxSize = 10 * 1024 * 1024 // 10MB
+    // Validate file size (images 10MB, PDF 20MB)
+    const isPdf = file.type === 'application/pdf' || file.name.match(/\.pdf$/i)
+    const maxSize = isPdf ? 20 * 1024 * 1024 : 10 * 1024 * 1024
     if (file.size > maxSize) {
       return NextResponse.json(
-        { error: 'File size exceeds 10MB limit' },
+        { error: isPdf ? 'File size exceeds 20MB limit' : 'File size exceeds 10MB limit' },
         { status: 400 }
       )
     }

@@ -29,6 +29,8 @@ interface ServiceRequest {
   appointmentDate: string
   notes: string
   imageUrl: string
+  pdfUrl?: string
+  pdfFileName?: string
   history: { status: Status; date: string; by: string }[]
   calendarEventId?: string
   calendarEventUrl?: string
@@ -95,6 +97,11 @@ export default function Home() {
   // AI Image State
   const [aiImageBase64, setAiImageBase64] = useState<string>('')
 
+  // PDF State
+  const [isPdfUploading, setIsPdfUploading] = useState(false)
+  const [isPdfAnalyzing, setIsPdfAnalyzing] = useState(false)
+  const [pdfBase64, setPdfBase64] = useState<string>('')
+
   // AI Voice State
   const [isRecording, setIsRecording] = useState(false)
   const [voiceTranscript, setVoiceTranscript] = useState('')
@@ -118,7 +125,9 @@ export default function Home() {
     status: 'new',
     appointmentDate: '',
     notes: '',
-    imageUrl: ''
+    imageUrl: '',
+    pdfUrl: '',
+    pdfFileName: ''
   })
 
   // Load user and auth state from storage
@@ -485,6 +494,8 @@ export default function Home() {
           appointmentDate: formData.appointmentDate || '',
           notes: formData.notes || '',
           imageUrl: formData.imageUrl || '',
+          pdfUrl: formData.pdfUrl || '',
+          pdfFileName: formData.pdfFileName || '',
           history: [{ status: 'new', date: new Date().toISOString(), by: user?.name || 'System' }]
         }
 
@@ -558,7 +569,9 @@ export default function Home() {
         status: 'new',
         appointmentDate: '',
         notes: '',
-        imageUrl: ''
+        imageUrl: '',
+        pdfUrl: '',
+        pdfFileName: ''
       })
     }
     setIsModalOpen(true)
@@ -569,6 +582,7 @@ export default function Home() {
     setEditingRequest(null)
     setUploadProgress(null)
     setPendingDriveFile(null)
+    setPdfBase64('')
   }
 
   const updateStatus = async (id: string, newStatus: Status) => {
@@ -679,6 +693,95 @@ export default function Home() {
       setFormData(prev => ({ ...prev, imageUrl: url }))
     } else {
       alert('อัปโหลดรูปไม่สำเร็จ')
+    }
+  }
+
+  // PDF Upload Handler
+  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const isPdf = file.type === 'application/pdf' || file.name.match(/\.pdf$/i)
+    if (!isPdf) {
+      alert('รองรับเฉพาะไฟล์ PDF เท่านั้น')
+      return
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      alert('ไฟล์ PDF ใหญ่เกิน 20MB')
+      return
+    }
+
+    setIsPdfUploading(true)
+    try {
+      // Upload to Google Drive
+      const form = new FormData()
+      form.append('file', file)
+      const params = new URLSearchParams({
+        customerName: formData.customerName || '',
+        address: formData.address || ''
+      })
+      const res = await fetch(`/api/upload?${params}`, { method: 'POST', body: form })
+      const data = await res.json()
+
+      if (data.success) {
+        setFormData(prev => ({
+          ...prev,
+          pdfUrl: data.data.webViewLink || data.data.directUrl,
+          pdfFileName: file.name
+        }))
+        // Store base64 for AI analysis
+        const reader = new FileReader()
+        reader.onload = (ev) => {
+          if (ev.target?.result) setPdfBase64(ev.target.result as string)
+        }
+        reader.readAsDataURL(file)
+      } else {
+        alert('อัปโหลด PDF ไม่สำเร็จ: ' + (data.error || 'เกิดข้อผิดพลาด'))
+      }
+    } catch (err) {
+      console.error('PDF upload error:', err)
+      alert('อัปโหลด PDF ไม่สำเร็จ')
+    } finally {
+      setIsPdfUploading(false)
+    }
+  }
+
+  // PDF AI Analysis Handler
+  const handlePdfAnalyze = async () => {
+    if (!pdfBase64) {
+      alert('กรุณาอัปโหลด PDF ก่อน')
+      return
+    }
+
+    setIsPdfAnalyzing(true)
+    try {
+      const response = await fetch('/api/ai/analyze-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdfBase64 })
+      })
+      const result = await response.json()
+
+      if (result.success && result.data) {
+        const d = result.data
+        setFormData(prev => ({
+          ...prev,
+          customerName: d.shopName || prev.customerName,
+          contactName: d.contactName || prev.contactName,
+          phone: d.phone || prev.phone,
+          address: d.address || prev.address,
+          serviceType: d.serviceType || prev.serviceType,
+          description: d.description || prev.description
+        }))
+        alert('AI อ่าน PDF สำเร็จ! ข้อมูลถูกกรอกแล้ว')
+      } else {
+        alert('AI อ่าน PDF ไม่สำเร็จ: ' + (result.error || 'เกิดข้อผิดพลาด'))
+      }
+    } catch (err) {
+      console.error('PDF analyze error:', err)
+      alert('เกิดข้อผิดพลาดในการเชื่อมต่อกับ AI')
+    } finally {
+      setIsPdfAnalyzing(false)
     }
   }
 
@@ -1194,6 +1297,21 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* PDF Link */}
+                {request.pdfUrl && (
+                  <div className="mb-3">
+                    <a
+                      href={request.pdfUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg border border-slate-200"
+                    >
+                      <span>📄</span>
+                      <span className="truncate max-w-[200px]">{request.pdfFileName || 'เปิดดูไฟล์ PDF'}</span>
+                    </a>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-2 mb-3 text-sm">
                   <span className="bg-slate-100 px-2 py-1 rounded text-slate-600">{request.serviceType}</span>
                   <span className="text-slate-400">•</span>
@@ -1610,6 +1728,74 @@ export default function Home() {
                             <div className="text-3xl mb-2">📤</div>
                             <p className="text-sm text-slate-500">คลิกเพื่ออัปโหลดรูปภาพ</p>
                             <p className="text-xs text-slate-400">รองรับ JPG, PNG, GIF (สูงสุด 10MB)</p>
+                          </>
+                        )}
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* PDF Upload */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">📄 แนบไฟล์ PDF (ใบเสนอราคา / เอกสาร)</label>
+                <div className="space-y-2">
+                  {formData.pdfUrl ? (
+                    <div className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-200 rounded-xl">
+                      <span className="text-2xl">📄</span>
+                      <div className="flex-1 min-w-0">
+                        <a
+                          href={formData.pdfUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sm text-blue-600 underline truncate block"
+                        >
+                          {formData.pdfFileName || 'เปิดดูไฟล์ PDF'}
+                        </a>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        {pdfBase64 && (
+                          <button
+                            type="button"
+                            onClick={handlePdfAnalyze}
+                            disabled={isPdfAnalyzing}
+                            className="px-3 py-1 bg-purple-600 text-white text-xs rounded-lg disabled:opacity-50"
+                          >
+                            {isPdfAnalyzing ? '⏳ กำลังอ่าน...' : '🤖 AI อ่าน PDF'}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormData(prev => ({ ...prev, pdfUrl: '', pdfFileName: '' }))
+                            setPdfBase64('')
+                          }}
+                          className="px-2 py-1 bg-red-500 text-white text-xs rounded-lg"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center">
+                      <input
+                        type="file"
+                        accept="application/pdf,.pdf"
+                        onChange={handlePdfUpload}
+                        className="hidden"
+                        id="pdf-upload"
+                      />
+                      <label htmlFor="pdf-upload" className="cursor-pointer">
+                        {isPdfUploading ? (
+                          <div className="space-y-1">
+                            <div className="text-2xl">⏳</div>
+                            <p className="text-sm text-slate-500">กำลังอัปโหลด PDF...</p>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="text-3xl mb-2">📎</div>
+                            <p className="text-sm text-slate-500">คลิกเพื่ออัปโหลด PDF</p>
+                            <p className="text-xs text-slate-400">รองรับ PDF (สูงสุด 20MB) — AI จะอ่านข้อมูลให้อัตโนมัติ</p>
                           </>
                         )}
                       </label>
