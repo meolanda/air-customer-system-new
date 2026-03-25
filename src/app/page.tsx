@@ -6,7 +6,7 @@ import { ref, onValue, set, update, remove } from 'firebase/database'
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
 import { db, storage } from '../lib/firebase'
 // Types
-type Status = 'new' | 'queue' | 'waiting_quote' | 'checking_parts' | 'send_quote' | 'waiting_response' | 'completed' | 'cancelled'
+type Status = 'new' | 'queue' | 'waiting_quote' | 'checking_parts' | 'order_parts' | 'send_quote' | 'waiting_response' | 'completed' | 'cancelled'
 
 interface User {
   id: string
@@ -53,6 +53,7 @@ const STATUS_CONFIG: Record<Status, { label: string; icon: string; color: string
   queue: { label: 'จองคิว / นัดหมาย', icon: '📋', color: 'bg-yellow-500' },
   waiting_quote: { label: 'ขอใบเสนอราคา', icon: '💰', color: 'bg-orange-500' },
   checking_parts: { label: 'เช็คอะไหล่ + เสนอราคา', icon: '🔧', color: 'bg-indigo-500' },
+  order_parts: { label: 'แจ้งซื้ออะไหล่', icon: '🛒', color: 'bg-cyan-600' },
   send_quote: { label: 'ส่งใบเสนอราคาแล้ว', icon: '📨', color: 'bg-teal-500' },
   waiting_response: { label: 'รอลูกค้าตอบกลับ', icon: '⏳', color: 'bg-amber-500' },
   completed: { label: 'เสร็จสิ้น', icon: '🏁', color: 'bg-gray-500' },
@@ -67,7 +68,8 @@ const STATUS_TRANSITIONS: Record<Status, Status[]> = {
   new: ['queue', 'waiting_quote', 'checking_parts', 'cancelled'],
   queue: ['completed', 'cancelled'],
   waiting_quote: ['send_quote', 'cancelled'],
-  checking_parts: ['send_quote', 'cancelled'],
+  checking_parts: ['order_parts', 'send_quote', 'cancelled'],
+  order_parts: ['send_quote', 'completed', 'cancelled'],
   send_quote: ['waiting_response', 'cancelled'],
   waiting_response: ['new', 'cancelled'],
   completed: [],
@@ -207,7 +209,7 @@ export default function Home() {
   const handleExportExcel = () => {
     const STATUS_LABEL: Record<string, string> = {
       new: 'รับเรื่องใหม่', queue: 'จองคิว/นัดหมาย', waiting_quote: 'ขอใบเสนอราคา',
-      checking_parts: 'เช็คอะไหล่+เสนอราคา', send_quote: 'ส่งใบเสนอราคาแล้ว',
+      checking_parts: 'เช็คอะไหล่+เสนอราคา', order_parts: 'แจ้งซื้ออะไหล่', send_quote: 'ส่งใบเสนอราคาแล้ว',
       waiting_response: 'รอลูกค้าตอบกลับ', completed: 'เสร็จสิ้น', cancelled: 'ยกเลิก'
     }
     const rows = requests.map(r => ({
@@ -344,7 +346,7 @@ export default function Home() {
   // Stats for dashboard
   const stats = useMemo(() => {
     if (!user) return { total: 0, todo: 0, done: 0 }
-    const todoStatuses = ['new', 'queue', 'waiting_quote', 'checking_parts', 'send_quote', 'waiting_response']
+    const todoStatuses = ['new', 'queue', 'waiting_quote', 'checking_parts', 'order_parts', 'send_quote', 'waiting_response']
     return {
       total: requests.length,
       todo: requests.filter(r => todoStatuses.includes(r.status)).length,
