@@ -391,6 +391,39 @@ export default function Home() {
   }
 
   // Handle form
+  // Background sync — ไม่ block UI
+  const syncSheetsInBackground = (request: ServiceRequest, method: 'POST' | 'PUT') => {
+    fetch('/api/sheets', {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    }).then(async res => {
+      if (!res.ok && method === 'PUT' && res.status === 404) {
+        // Fallback POST
+        return fetch('/api/sheets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request)
+        })
+      }
+      return res
+    }).catch(e => console.error('Sheets bg sync failed:', e))
+  }
+
+  const syncCalendarInBackground = (request: ServiceRequest, method: 'POST' | 'PUT') => {
+    fetch('/api/calendar', {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...request, eventId: request.calendarEventId })
+    }).then(async res => {
+      const result = await res.json().catch(() => ({}))
+      if (result.success && result.data?.eventId) {
+        const updated = { ...request, calendarEventId: result.data.eventId, ...(result.data.eventUrl ? { calendarEventUrl: result.data.eventUrl } : {}) }
+        await set(ref(db, `serviceRequests/${updated.id}`), updated)
+      }
+    }).catch(e => console.error('Calendar bg sync failed:', e))
+  }
+
   const handleSubmit = async () => {
     if (!formData.customerName || !formData.phone || !formData.address) {
       alert('กรุณากรอกชื่อร้าน/สาขา, เบอร์โทร และที่อยู่ (เป็นช่องบังคับ)')
@@ -420,68 +453,17 @@ export default function Home() {
             : editingRequest.history
         } as ServiceRequest
 
-        // Save to Firebase (state will update automatically via onValue)
+        // 1. Firebase save (critical path)
         await set(ref(db, `serviceRequests/${updatedRequest.id}`), updatedRequest)
 
-        // Notify if status changed
-        if (statusChanged) {
-          sendTelegramNotification(updatedRequest, 'UPDATE')
-        }
+        // 2. ปิด modal ทันที — ไม่รอ Sheets/Calendar
+        closeModal()
 
-        // Sync to Google Sheets if completed or cancelled
-        // Sync to Google Sheets immediately (1:1 sync)
-        try {
-          // Attempt to PUT to Sheets
-          const resSheet = await fetch('/api/sheets', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updatedRequest)
-          });
-
-          // Check for errors
-          if (!resSheet.ok) {
-            const errorData = await resSheet.json().catch(() => ({ error: 'Unknown error' }));
-            console.error('Sheets sync failed:', errorData);
-            alert(`⚠️ ไม่สามารถ sync ไปยัง Google Sheets ได้: ${errorData.error || errorData.details || 'Unknown error'}`);
-          }
-
-          // Fallback to POST if not found
-          if (resSheet.status === 404) {
-            const resPost = await fetch('/api/sheets', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(updatedRequest)
-            });
-
-            if (!resPost.ok) {
-              const errorData = await resPost.json().catch(() => ({ error: 'Unknown error' }));
-              console.error('Sheets sync (POST) failed:', errorData);
-              alert(`⚠️ ไม่สามารถ sync ไปยัง Google Sheets ได้: ${errorData.error || errorData.details || 'Unknown error'}`);
-            }
-          }
-        } catch (e) {
-          console.error('Failed to sync update to Google Sheets:', e);
-          alert('⚠️ เกิดข้อผิดพลาดในการ sync ไปยัง Google Sheets กรุณาตรวจสอบ console');
-        }
-
-        // Sync to Google Calendar if status is queue (POST=ใหม่, PUT=อัพเดท/สร้างใหม่ถ้าถูกลบ)
+        // 3. Background sync (ไม่ block UI)
+        if (statusChanged) sendTelegramNotification(updatedRequest, 'UPDATE')
+        syncSheetsInBackground(updatedRequest, 'PUT')
         if (newStatus === 'queue') {
-          try {
-            const method = updatedRequest.calendarEventId ? 'PUT' : 'POST'
-            const res = await fetch('/api/calendar', {
-              method,
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ...updatedRequest, eventId: updatedRequest.calendarEventId })
-            })
-            const result = await res.json()
-            if (result.success && result.data?.eventId) {
-              updatedRequest.calendarEventId = result.data.eventId
-              if (result.data.eventUrl) updatedRequest.calendarEventUrl = result.data.eventUrl
-              await set(ref(db, `serviceRequests/${updatedRequest.id}`), updatedRequest)
-            }
-          } catch (e) {
-            console.error('Failed to sync to Calendar:', e)
-          }
+          syncCalendarInBackground(updatedRequest, updatedRequest.calendarEventId ? 'PUT' : 'POST')
         }
       } else {
         // Create
@@ -507,50 +489,19 @@ export default function Home() {
           history: [{ status: 'new', date: new Date().toISOString(), by: user?.name || 'System' }]
         }
 
-        // Save to Firebase (state will update automatically via onValue)
+        // 1. Firebase save (critical path)
         await set(ref(db, `serviceRequests/${newRequest.id}`), newRequest)
 
-        // Notify new job
+        // 2. ปิด modal ทันที
+        closeModal()
+
+        // 3. Background sync (ไม่ block UI)
         sendTelegramNotification(newRequest, 'NEW')
-
-        // Sync to Google Sheets immediately (1:1 sync)
-        try {
-          const resSheet = await fetch('/api/sheets', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newRequest)
-          });
-          
-          if (!resSheet.ok) {
-            const errorData = await resSheet.json().catch(() => ({ error: 'Unknown error' }));
-            console.error('Sheets sync (POST) failed:', errorData);
-            alert(`⚠️ ไม่สามารถ sync งานใหม่ไปยัง Google Sheets ได้: ${errorData.error || errorData.details || 'Unknown error'}`);
-          }
-        } catch (e) {
-          console.error('Failed to sync new request to Google Sheets:', e);
-          alert('⚠️ เกิดข้อผิดพลาดในการ sync งานใหม่ไปยัง Google Sheets กรุณาตรวจสอบ console');
-        }
-
-        // Sync to Google Calendar if created as queue
+        syncSheetsInBackground(newRequest, 'POST')
         if (newRequest.status === 'queue') {
-          try {
-            const res = await fetch('/api/calendar', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(newRequest)
-            })
-            const result = await res.json()
-            if (result.success && result.data?.eventId) {
-              newRequest.calendarEventId = result.data.eventId
-              if (result.data.eventUrl) newRequest.calendarEventUrl = result.data.eventUrl
-              await set(ref(db, `serviceRequests/${newRequest.id}`), newRequest)
-            }
-          } catch (e) {
-            console.error('Failed to sync to Calendar:', e)
-          }
+          syncCalendarInBackground(newRequest, 'POST')
         }
       }
-      closeModal()
     } catch (error) {
       console.error('Error saving:', error)
       alert('บันทึกไม่สำเร็จ กรุณาลองใหม่')
