@@ -27,6 +27,8 @@ interface ServiceRequest {
   priority: 'normal' | 'urgent' | 'emergency'
   status: Status
   appointmentDate: string
+  appointmentEndDate?: string
+  isAllDay?: boolean
   notes: string
   imageUrl: string
   pdfUrl?: string
@@ -126,6 +128,8 @@ export default function Home() {
     priority: 'normal',
     status: 'new',
     appointmentDate: '',
+    appointmentEndDate: '',
+    isAllDay: false,
     notes: '',
     imageUrl: '',
     pdfUrl: '',
@@ -494,6 +498,8 @@ export default function Home() {
           priority: formData.priority || 'normal',
           status: formData.status || 'new',
           appointmentDate: formData.appointmentDate || '',
+          appointmentEndDate: formData.appointmentEndDate || '',
+          isAllDay: formData.isAllDay || false,
           notes: formData.notes || '',
           imageUrl: formData.imageUrl || '',
           pdfUrl: formData.pdfUrl || '',
@@ -570,6 +576,8 @@ export default function Home() {
         priority: 'normal',
         status: 'new',
         appointmentDate: '',
+        appointmentEndDate: '',
+        isAllDay: false,
         notes: '',
         imageUrl: '',
         pdfUrl: '',
@@ -1868,55 +1876,118 @@ export default function Home() {
 
               {/* Appointment Date */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">วันที่นัดหมาย (ถ้ามี)</label>
-                <div className="flex items-center gap-2">
-                  {/* Date */}
-                  <input
-                    type="date"
-                    value={formData.appointmentDate ? formData.appointmentDate.slice(0, 10) : ''}
-                    onChange={(e) => {
-                      const datePart = e.target.value
-                      const hh = formData.appointmentDate ? formData.appointmentDate.slice(11, 13) : '09'
-                      const mm = formData.appointmentDate ? formData.appointmentDate.slice(14, 16) : '00'
-                      setFormData(prev => ({ ...prev, appointmentDate: datePart ? `${datePart}T${hh}:${mm}` : '' }))
-                    }}
-                    className="flex-1 px-3 py-2 border rounded-xl text-sm"
-                  />
-                  <span className="text-slate-500 text-sm whitespace-nowrap">เวลา</span>
-                  {/* Hour */}
-                  <input
-                    type="number"
-                    min={0}
-                    max={23}
-                    placeholder="ชม."
-                    value={formData.appointmentDate ? parseInt(formData.appointmentDate.slice(11, 13) || '9') : ''}
-                    onChange={(e) => {
-                      const raw = parseInt(e.target.value)
-                      const hh = (isNaN(raw) ? 0 : Math.max(0, Math.min(23, raw))).toString().padStart(2, '0')
-                      const datePart = formData.appointmentDate ? formData.appointmentDate.slice(0, 10) : new Date().toISOString().slice(0, 10)
-                      const mm = formData.appointmentDate ? formData.appointmentDate.slice(14, 16) : '00'
-                      setFormData(prev => ({ ...prev, appointmentDate: `${datePart}T${hh}:${mm}` }))
-                    }}
-                    className="w-14 px-2 py-2 border rounded-xl text-sm text-center"
-                  />
-                  <span className="text-slate-600 font-bold">:</span>
-                  {/* Minute */}
-                  <input
-                    type="number"
-                    min={0}
-                    max={59}
-                    placeholder="นาที"
-                    value={formData.appointmentDate ? parseInt(formData.appointmentDate.slice(14, 16) || '0') : ''}
-                    onChange={(e) => {
-                      const raw = parseInt(e.target.value)
-                      const mm = (isNaN(raw) ? 0 : Math.max(0, Math.min(59, raw))).toString().padStart(2, '0')
-                      const datePart = formData.appointmentDate ? formData.appointmentDate.slice(0, 10) : new Date().toISOString().slice(0, 10)
-                      const hh = formData.appointmentDate ? formData.appointmentDate.slice(11, 13) : '09'
-                      setFormData(prev => ({ ...prev, appointmentDate: `${datePart}T${hh}:${mm}` }))
-                    }}
-                    className="w-14 px-2 py-2 border rounded-xl text-sm text-center"
-                  />
-                  <span className="text-slate-600 text-sm">น.</span>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-slate-700">วันที่นัดหมาย (ถ้ามี)</label>
+                  {/* All day toggle */}
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <span className="text-xs text-slate-500">ตลอดวัน</span>
+                    <div
+                      onClick={() => setFormData(prev => ({ ...prev, isAllDay: !prev.isAllDay }))}
+                      className={`relative w-10 h-5 rounded-full transition-colors ${formData.isAllDay ? 'bg-indigo-500' : 'bg-slate-200'}`}
+                    >
+                      <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${formData.isAllDay ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    </div>
+                  </label>
+                </div>
+
+                <div className="space-y-2">
+                  {/* Start row */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400 w-10 shrink-0">เริ่ม</span>
+                    <input
+                      type="date"
+                      value={formData.appointmentDate ? formData.appointmentDate.slice(0, 10) : ''}
+                      onChange={(e) => {
+                        const datePart = e.target.value
+                        const hh = formData.appointmentDate ? formData.appointmentDate.slice(11, 13) : '09'
+                        const mm = formData.appointmentDate ? formData.appointmentDate.slice(14, 16) : '00'
+                        setFormData(prev => ({ ...prev, appointmentDate: datePart ? `${datePart}T${hh}:${mm}` : '' }))
+                      }}
+                      className="flex-1 px-3 py-2 border rounded-xl text-sm"
+                    />
+                    {!formData.isAllDay && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <input
+                          type="number" min={0} max={23} placeholder="ชม."
+                          value={formData.appointmentDate ? parseInt(formData.appointmentDate.slice(11, 13) || '9') : ''}
+                          onChange={(e) => {
+                            const hh = (isNaN(parseInt(e.target.value)) ? 0 : Math.max(0, Math.min(23, parseInt(e.target.value)))).toString().padStart(2, '0')
+                            const datePart = formData.appointmentDate ? formData.appointmentDate.slice(0, 10) : new Date().toISOString().slice(0, 10)
+                            const mm = formData.appointmentDate ? formData.appointmentDate.slice(14, 16) : '00'
+                            setFormData(prev => ({ ...prev, appointmentDate: `${datePart}T${hh}:${mm}` }))
+                          }}
+                          className="w-12 px-1 py-2 border rounded-lg text-sm text-center"
+                        />
+                        <span className="text-slate-500">:</span>
+                        <input
+                          type="number" min={0} max={59} placeholder="นาที"
+                          value={formData.appointmentDate ? parseInt(formData.appointmentDate.slice(14, 16) || '0') : ''}
+                          onChange={(e) => {
+                            const mm = (isNaN(parseInt(e.target.value)) ? 0 : Math.max(0, Math.min(59, parseInt(e.target.value)))).toString().padStart(2, '0')
+                            const datePart = formData.appointmentDate ? formData.appointmentDate.slice(0, 10) : new Date().toISOString().slice(0, 10)
+                            const hh = formData.appointmentDate ? formData.appointmentDate.slice(11, 13) : '09'
+                            setFormData(prev => ({ ...prev, appointmentDate: `${datePart}T${hh}:${mm}` }))
+                          }}
+                          className="w-12 px-1 py-2 border rounded-lg text-sm text-center"
+                        />
+                        <span className="text-slate-500 text-xs">น.</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* End row */}
+                  {formData.appointmentDate && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400 w-10 shrink-0">สิ้นสุด</span>
+                      <input
+                        type="date"
+                        value={formData.appointmentEndDate ? formData.appointmentEndDate.slice(0, 10) : ''}
+                        min={formData.appointmentDate ? formData.appointmentDate.slice(0, 10) : undefined}
+                        onChange={(e) => {
+                          const datePart = e.target.value
+                          const hh = formData.appointmentEndDate ? formData.appointmentEndDate.slice(11, 13) : '17'
+                          const mm = formData.appointmentEndDate ? formData.appointmentEndDate.slice(14, 16) : '00'
+                          setFormData(prev => ({ ...prev, appointmentEndDate: datePart ? `${datePart}T${hh}:${mm}` : '' }))
+                        }}
+                        className="flex-1 px-3 py-2 border rounded-xl text-sm"
+                      />
+                      {!formData.isAllDay && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <input
+                            type="number" min={0} max={23} placeholder="ชม."
+                            value={formData.appointmentEndDate ? parseInt(formData.appointmentEndDate.slice(11, 13) || '17') : ''}
+                            onChange={(e) => {
+                              const hh = (isNaN(parseInt(e.target.value)) ? 0 : Math.max(0, Math.min(23, parseInt(e.target.value)))).toString().padStart(2, '0')
+                              const datePart = formData.appointmentEndDate ? formData.appointmentEndDate.slice(0, 10) : (formData.appointmentDate ? formData.appointmentDate.slice(0, 10) : new Date().toISOString().slice(0, 10))
+                              const mm = formData.appointmentEndDate ? formData.appointmentEndDate.slice(14, 16) : '00'
+                              setFormData(prev => ({ ...prev, appointmentEndDate: `${datePart}T${hh}:${mm}` }))
+                            }}
+                            className="w-12 px-1 py-2 border rounded-lg text-sm text-center"
+                          />
+                          <span className="text-slate-500">:</span>
+                          <input
+                            type="number" min={0} max={59} placeholder="นาที"
+                            value={formData.appointmentEndDate ? parseInt(formData.appointmentEndDate.slice(14, 16) || '0') : ''}
+                            onChange={(e) => {
+                              const mm = (isNaN(parseInt(e.target.value)) ? 0 : Math.max(0, Math.min(59, parseInt(e.target.value)))).toString().padStart(2, '0')
+                              const datePart = formData.appointmentEndDate ? formData.appointmentEndDate.slice(0, 10) : (formData.appointmentDate ? formData.appointmentDate.slice(0, 10) : new Date().toISOString().slice(0, 10))
+                              const hh = formData.appointmentEndDate ? formData.appointmentEndDate.slice(11, 13) : '17'
+                              setFormData(prev => ({ ...prev, appointmentEndDate: `${datePart}T${hh}:${mm}` }))
+                            }}
+                            className="w-12 px-1 py-2 border rounded-lg text-sm text-center"
+                          />
+                          <span className="text-slate-500 text-xs">น.</span>
+                        </div>
+                      )}
+                      {formData.appointmentEndDate && (
+                        <button
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, appointmentEndDate: '' }))}
+                          className="text-slate-400 hover:text-red-400 text-xs shrink-0"
+                        >✕</button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
