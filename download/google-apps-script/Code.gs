@@ -337,6 +337,35 @@ function uploadImage(base64Data, fileName) {
   }
 }
 
+// ==================== FILE UPLOAD (PDF / Documents) ====================
+
+// Upload any file (PDF, doc, etc.) to Google Drive
+// Returns a Google Drive view URL
+function uploadFile(base64Data, fileName) {
+  try {
+    const folder = getOrCreateDriveFolder()
+
+    const mimeType = base64Data.split(';')[0].split(':')[1]
+    const base64 = base64Data.split(',')[1]
+    const blob = Utilities.newBlob(
+      Utilities.base64Decode(base64),
+      mimeType,
+      fileName || `file_${Date.now()}.pdf`
+    )
+
+    const file = folder.createFile(blob)
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW)
+
+    const fileId = file.getId()
+    // ใช้ /file/d/.../view เพื่อเปิดใน Google Drive Viewer (ดู PDF ได้ใน browser)
+    const url = `https://drive.google.com/file/d/${fileId}/view`
+
+    return { success: true, url: url, fileId: fileId, fileName: fileName }
+  } catch (error) {
+    return { success: false, error: error.toString() }
+  }
+}
+
 // ==================== HELPER FUNCTIONS ====================
 
 // Get or create main sheet
@@ -372,7 +401,7 @@ function getHeaders() {
   return [
     'id', 'requestNo', 'createdAt', 'channel', 'customerName',
     'phone', 'address', 'serviceType', 'description', 'priority',
-    'status', 'appointmentDate', 'notes', 'imageUrl', 'history'
+    'status', 'appointmentDate', 'notes', 'imageUrl', 'pdfUrl', 'pdfFileName', 'history'
   ]
 }
 
@@ -497,6 +526,58 @@ function analyzeTextWithAI(text) {
 
     const resultText = json.candidates[0].content.parts[0].text;
     const data = JSON.parse(resultText);
+    return { success: true, data: data };
+  } catch (e) {
+    return { success: false, error: e.toString() };
+  }
+}
+
+// ==================== PDF ANALYSIS WITH AI ====================
+
+// Analyze PDF with Gemini — ถอดข้อความ + สกัดข้อมูลงานบริการแอร์
+function analyzePdfWithAI(base64Data) {
+  try {
+    const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+    if (!apiKey) return { success: false, error: 'ไม่พบ GEMINI_API_KEY ใน Script Properties' };
+
+    const base64 = base64Data.split(',')[1];
+
+    const prompt = `อ่านและวิเคราะห์เนื้อหาจากเอกสาร PDF นี้ที่เกี่ยวกับงานบริการแอร์คอนดิชั่น
+แยกข้อมูลและตอบกลับเป็นรูปแบบ JSON เท่านั้น โดยปฏิบัติตามกฎต่อไปนี้อย่างเคร่งครัด:
+
+1. customerName: "ระบุเฉพาะชื่อบุคคล, แสลงเรียกบุคคล หรือ แบรนด์/บริษัท/องค์กร เท่านั้น"
+   ***ห้ามนำคำกริยา, คำสั่ง หรือรายละเอียดงานมาใส่ หากไม่มีชื่อชัดเจน ให้เว้นว่างไว้ ("")***
+2. phone: "เบอร์โทรศัพท์" (ถ้ามี)
+3. address: "ชื่อสาขา, ชื่อโครงการ, หมู่บ้าน, สถานที่, หรือที่อยู่"
+4. serviceType: เลือก 1 ในหมวดหมู่: "ล้างแอร์", "ซ่อม", "ติดตั้ง", "ตรวจสอบ" หรือ "อื่นๆ"
+5. priority: เลือกระดับความเร่งด่วน: "normal", "urgent", "emergency"
+6. description: "สรุปรายละเอียดคำสั่งงาน อาการแอร์ หรือสิ่งที่ลูกค้าต้องการทั้งหมด"
+7. rawText: "ข้อความทั้งหมดที่อ่านได้จาก PDF (คัดลอกมาครบถ้วน เพื่อแสดงผล)"
+
+ตอบเป็น JSON ล้วนๆ ห้ามมีเครื่องหมาย markdown หรือ \`\`\` ครอบ และห้ามมีคำอธิบายเพิ่มเติม:
+{"customerName":"","phone":"","address":"","serviceType":"","priority":"","description":"","rawText":""}`;
+
+    const payload = {
+      contents: [{ parts: [
+        { text: prompt },
+        { inline_data: { mime_type: 'application/pdf', data: base64 } }
+      ]}],
+      generationConfig: { response_mime_type: 'application/json' }
+    };
+
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
+    const response = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+
+    const json = JSON.parse(response.getContentText());
+    if (json.error) return { success: false, error: json.error.message };
+
+    const text = json.candidates[0].content.parts[0].text;
+    const data = JSON.parse(text);
     return { success: true, data: data };
   } catch (e) {
     return { success: false, error: e.toString() };

@@ -132,9 +132,12 @@
     bottomSheet: null,
     smartPasteTab: 'text',
     aiAnalyzing: false,
+    uploadingImage: false,
     voiceRecording: false,
     voiceTranscript: '',
     aiImageBase64: null,
+    aiPdfBase64: null,
+    aiPdfFileName: '',
     formData: {
       channel: 'LINE',
       customerName: '',
@@ -146,7 +149,9 @@
       status: 'new',
       appointmentDate: '',
       notes: '',
-      imageUrl: ''
+      imageUrl: '',
+      pdfUrl: '',
+      pdfFileName: ''
     },
     technicians: [],
     bookingModal: null  // requestId of the job being booked
@@ -319,24 +324,105 @@
     }
   }
 
+  function compressImage(file, maxWidth, maxHeight, quality) {
+    return new Promise(function (resolve, reject) {
+      const reader = new FileReader()
+      reader.onload = function (e) {
+        const img = new Image()
+        img.onload = function () {
+          let w = img.width, h = img.height
+          if (w > maxWidth || h > maxHeight) {
+            const ratio = Math.min(maxWidth / w, maxHeight / h)
+            w = Math.round(w * ratio)
+            h = Math.round(h * ratio)
+          }
+          const canvas = document.createElement('canvas')
+          canvas.width = w
+          canvas.height = h
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h)
+          resolve(canvas.toDataURL('image/jpeg', quality))
+        }
+        img.onerror = reject
+        img.src = e.target.result
+      }
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+  }
+
   async function handleFileUpload(event) {
     const file = event.target.files[0]
     if (!file) return
+
+    state.uploadingImage = true
+    render()
+
+    try {
+      // ย่อรูปก่อนอัปโหลด (รองรับกล้อง Infinix / Android ความละเอียดสูง)
+      const base64 = await compressImage(file, 1920, 1920, 0.75)
+
+      // timeout 60 วิ — ถ้า GAS ไม่ตอบกลับ จะแสดง error แทนการหมุนค้าง
+      const uploadPromise = googleScriptRun('uploadImage', base64, file.name)
+      const timeoutPromise = new Promise(function (_, reject) {
+        setTimeout(function () { reject(new Error('หมดเวลา — กรุณาลองใหม่อีกครั้ง')) }, 60000)
+      })
+      const result = await Promise.race([uploadPromise, timeoutPromise])
+
+      if (result && result.success) {
+        state.formData.imageUrl = result.url
+      } else {
+        alert('อัปโหลดรูปไม่สำเร็จ: ' + (result && result.error ? result.error : 'ไม่ทราบสาเหตุ'))
+      }
+    } catch (error) {
+      console.error('Upload error:', error)
+      alert('อัปโหลดรูปไม่สำเร็จ: ' + (error && (error.message || String(error)) || 'ไม่ทราบสาเหตุ'))
+    } finally {
+      state.uploadingImage = false
+      render()
+    }
+  }
+
+  async function handlePdfUpload(event) {
+    const file = event.target.files[0]
+    if (!file) return
+
+    // ตรวจสอบประเภทไฟล์
+    const allowedTypes = ['application/pdf', 'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+    if (!allowedTypes.includes(file.type) && !file.name.match(/\.(pdf|doc|docx)$/i)) {
+      alert('รองรับเฉพาะไฟล์ PDF, DOC, DOCX เท่านั้น')
+      event.target.value = ''
+      return
+    }
+
+    // จำกัดขนาดไฟล์ 20MB
+    if (file.size > 20 * 1024 * 1024) {
+      alert('ไฟล์ใหญ่เกินไป (สูงสุด 20MB)')
+      event.target.value = ''
+      return
+    }
+
+    // แสดง loading
+    const label = document.getElementById('pdfUploadLabel')
+    if (label) label.textContent = '⏳ กำลังอัปโหลด...'
 
     const reader = new FileReader()
     reader.onload = async function (e) {
       try {
         const base64 = e.target.result
-        const result = await googleScriptRun('uploadImage', base64, file.name)
+        const result = await googleScriptRun('uploadFile', base64, file.name)
         if (result && result.success) {
-          state.formData.imageUrl = result.url
+          state.formData.pdfUrl = result.url
+          state.formData.pdfFileName = file.name
           render()
         } else {
-          alert('อัปโหลดรูปไม่สำเร็จ: ' + (result ? result.error : 'Unknown error'))
+          alert('อัปโหลด PDF ไม่สำเร็จ: ' + (result ? result.error : 'Unknown error'))
+          if (label) label.textContent = '📎 แนบไฟล์ PDF / DOC'
         }
       } catch (error) {
-        console.error('Upload error:', error)
-        alert('อัปโหลดรูปไม่สำเร็จ: ' + error.message)
+        console.error('PDF upload error:', error)
+        alert('อัปโหลด PDF ไม่สำเร็จ: ' + error.message)
+        if (label) label.textContent = '📎 แนบไฟล์ PDF / DOC'
       }
     }
     reader.readAsDataURL(file)
@@ -469,7 +555,9 @@
       status: 'new',
       appointmentDate: '',
       notes: '',
-      imageUrl: ''
+      imageUrl: '',
+      pdfUrl: '',
+      pdfFileName: ''
     };
     state.isModalOpen = true;
     render();
@@ -620,6 +708,12 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  window.clearPdf = function () {
+    state.formData.pdfUrl = '';
+    state.formData.pdfFileName = '';
+    render();
+  };
+
   window.toggleCard = function (id) {
     state.expandedCards[id] = !state.expandedCards[id];
     render();
@@ -687,6 +781,28 @@
         applyAiResult(result.data);
       } else {
         alert('AI วิเคราะห์ไม่สำเร็จ: ' + result.error);
+      }
+    } catch (e) {
+      alert('เกิดข้อผิดพลาด: ' + e.message);
+    }
+    state.aiAnalyzing = false;
+    render();
+  };
+
+  window.processAiPdf = async function () {
+    if (!state.aiPdfBase64) { alert('กรุณาเลือกไฟล์ PDF ก่อน'); return; }
+    state.aiAnalyzing = true;
+    render();
+    try {
+      const result = await googleScriptRun('analyzePdfWithAI', state.aiPdfBase64);
+      if (result.success) {
+        applyAiResult(result.data);
+        // แสดง rawText ใน description ถ้าไม่มีข้อมูลอื่น
+        if (result.data.rawText && !result.data.description) {
+          state.formData.description = result.data.rawText;
+        }
+      } else {
+        alert('AI ถอดข้อความ PDF ไม่สำเร็จ: ' + result.error);
       }
     } catch (e) {
       alert('เกิดข้อผิดพลาด: ' + e.message);
@@ -808,12 +924,31 @@
         + voiceBody;
     }
 
+    } else if (tab === 'pdf') {
+      var pdfBtnBg = state.aiAnalyzing ? '#86efac' : (state.aiPdfBase64 ? '#16a34a' : '#166534');
+      var pdfBtnCursor = (state.aiAnalyzing || !state.aiPdfBase64) ? 'not-allowed' : 'pointer';
+      var pdfBtnDisabled = (!state.aiPdfBase64 || state.aiAnalyzing) ? ' disabled' : '';
+      var pdfBtnLabel = state.aiAnalyzing ? '⏳ กำลังถอดข้อความ...' : '🤖 AI ถอดข้อความ PDF';
+      tabContent =
+        '<label for="aiPdfInput" style="display:block; padding:10px 14px; border:2px dashed #4ade80;'
+        + ' border-radius:8px; background:' + T.inputBg + '; color:' + T.textSecond + ';'
+        + ' font-size:13px; cursor:pointer; text-align:center; margin-bottom:0;">'
+        + (state.aiPdfFileName ? '📄 ' + escapeHtml(state.aiPdfFileName) : '📂 เลือกไฟล์ PDF (สูงสุด 20MB)') + '</label>'
+        + '<input type="file" id="aiPdfInput" accept=".pdf,application/pdf" style="display:none;">'
+        + '<button type="button" onclick="window.processAiPdf()"' + pdfBtnDisabled
+        + ' style="margin-top:8px; width:100%; padding:8px; border-radius:8px; font-weight:500; color:white;'
+        + ' background:' + pdfBtnBg + '; cursor:' + pdfBtnCursor + '; border:none;">'
+        + pdfBtnLabel + '</button>';
+
+    }
+
     return '<div style="background:#052e16; padding:12px; border-radius:12px; border:1px solid #166534; margin-bottom:8px;">'
       + '<label style="display:block; font-size:14px; font-weight:600; color:#4ade80; margin-bottom:8px;">🤖 AI ช่วยเติมข้อมูล</label>'
       + '<div style="display:flex; gap:4px; margin-bottom:10px;">'
       + '<button type="button" onclick="window.setSmartPasteTab(\'text\')"  style="' + tabStyle('text') + '">📝 ข้อความ</button>'
       + '<button type="button" onclick="window.setSmartPasteTab(\'image\')" style="' + tabStyle('image') + '">🖼️ รูปภาพ</button>'
       + '<button type="button" onclick="window.setSmartPasteTab(\'voice\')" style="' + tabStyle('voice') + '">🎤 เสียง</button>'
+      + '<button type="button" onclick="window.setSmartPasteTab(\'pdf\')"   style="' + tabStyle('pdf') + '">📄 PDF</button>'
       + '</div>'
       + tabContent
       + '</div>';
@@ -858,14 +993,42 @@
       imageInput.onchange = handleFileUpload
     }
 
+    const pdfInput = document.getElementById('pdfInput')
+    if (pdfInput) {
+      pdfInput.onchange = handlePdfUpload
+    }
+
     const aiImageInput = document.getElementById('aiImageInput')
     if (aiImageInput) {
       aiImageInput.onchange = function (e) {
         const file = e.target.files[0];
         if (!file) return;
+        compressImage(file, 1920, 1920, 0.75).then(function (base64) {
+          state.aiImageBase64 = base64;
+          render();
+        });
+      };
+    }
+
+    const aiPdfInput = document.getElementById('aiPdfInput')
+    if (aiPdfInput) {
+      aiPdfInput.onchange = function (e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (!file.name.match(/\.pdf$/i) && file.type !== 'application/pdf') {
+          alert('รองรับเฉพาะไฟล์ PDF เท่านั้น');
+          e.target.value = '';
+          return;
+        }
+        if (file.size > 20 * 1024 * 1024) {
+          alert('ไฟล์ใหญ่เกินไป (สูงสุด 20MB)');
+          e.target.value = '';
+          return;
+        }
         const reader = new FileReader();
         reader.onload = function (ev) {
-          state.aiImageBase64 = ev.target.result;
+          state.aiPdfBase64 = ev.target.result;
+          state.aiPdfFileName = file.name;
           render();
         };
         reader.readAsDataURL(file);
@@ -1206,8 +1369,27 @@
       + '<div><label style="' + labelStyle + '">หมายเหตุ</label>'
       + '<input type="text" id="notes" value="' + escapeAttr(state.formData.notes) + '" style="' + inputStyle + '"></div>'
       + '<div><label style="' + labelStyle + '">รูปภาพหน้างาน</label>'
-      + '<input type="file" id="imageInput" accept="image/*" style="font-size:14px; color:' + T.textPrimary + ';">'
+      + (state.uploadingImage
+          ? '<div style="padding:10px; background:' + T.inputBg + '; border-radius:8px; border:1px solid ' + T.inputBorder + '; color:' + T.textSecond + '; font-size:13px;">⏳ กำลังอัปโหลดรูป...</div>'
+          : '<input type="file" id="imageInput" accept="image/*" style="font-size:14px; color:' + T.textPrimary + ';">')
       + imgSection + '</div>'
+      + '<div><label style="' + labelStyle + '">แนบไฟล์เอกสาร (PDF / DOC)</label>'
+      + '<label id="pdfUploadLabel" for="pdfInput" style="display:flex; align-items:center; gap:8px; cursor:pointer;'
+      + ' padding:10px 14px; border:2px dashed ' + T.inputBorder + '; border-radius:10px;'
+      + ' background:' + T.inputBg + '; color:' + T.textSecond + '; font-size:14px; margin-top:4px;">'
+      + '📎 ' + (state.formData.pdfUrl ? escapeHtml(state.formData.pdfFileName || 'ไฟล์ที่แนบแล้ว') : 'เลือกไฟล์ PDF, DOC, DOCX (สูงสุด 20MB)') + '</label>'
+      + '<input type="file" id="pdfInput" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"'
+      + ' style="display:none;">'
+      + (state.formData.pdfUrl
+          ? '<div style="margin-top:6px; display:flex; align-items:center; gap:8px;">'
+            + '<a href="' + escapeAttr(state.formData.pdfUrl) + '" target="_blank"'
+            + ' style="font-size:13px; color:#3b82f6; text-decoration:none; flex:1;">'
+            + '📄 เปิดดูเอกสาร</a>'
+            + '<button type="button" onclick="window.clearPdf()"'
+            + ' style="font-size:12px; color:#ef4444; background:none; border:none; cursor:pointer; padding:2px 6px;">✕ ลบ</button>'
+            + '</div>'
+          : '')
+      + '</div>'
       + '</div>'
       + '<div style="position:sticky; bottom:0; background:' + T.sheetBg + '; padding:12px 16px; border-top:1px solid ' + T.cardBorder + '; display:flex; gap:12px;">'
       + '<button onclick="window.closeModal()" style="flex:1; padding:12px; border-radius:10px; background:' + T.btnSecBg + '; color:' + T.textSecond + '; font-size:15px; font-weight:500; border:none; cursor:pointer;">ยกเลิก</button>'
@@ -1294,6 +1476,11 @@
       if (r.description) dp += '<div style="background:' + T.descBg + ';border-radius:10px;padding:10px;font-size:13px;color:' + T.textSecond + ';line-height:1.5;">' + escapeHtml(r.description) + '</div>'
       if (r.notes) dp += '<div style="display:flex;gap:6px;"><span>📝</span><span style="font-size:12px;color:' + T.textFaint + ';">' + escapeHtml(r.notes) + '</span></div>'
       if (r.imageUrl) dp += '<img src="' + escapeAttr(r.imageUrl) + '" style="max-width:100%;max-height:180px;border-radius:10px;border:1px solid ' + T.cardBorder + ';object-fit:cover;" onerror="this.style.display=\'none\'">'
+      if (r.pdfUrl) dp += '<a href="' + escapeAttr(r.pdfUrl) + '" target="_blank"'
+        + ' style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;'
+        + 'background:' + T.chipBg + ';color:#3b82f6;font-size:13px;font-weight:500;text-decoration:none;'
+        + 'border:1px solid ' + T.cardBorder + ';">'
+        + '📄 ' + escapeHtml(r.pdfFileName || 'เปิดดูเอกสาร PDF') + '</a>'
       if (history.length > 1) {
         dp += '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">'
           + '<span style="font-size:11px;color:' + T.textFaint + ';margin-right:2px;">ประวัติ:</span>'
@@ -1308,7 +1495,7 @@
       expandedHtml = dp
     }
 
-    const hasDetail = r.address || r.description || r.imageUrl || r.notes || history.length > 1
+    const hasDetail = r.address || r.description || r.imageUrl || r.pdfUrl || r.notes || history.length > 1
     var expandBtn = hasDetail
       ? '<button onclick="window.toggleCard(\'' + escapeAttr(r.id) + '\')"'
       + ' style="padding:7px 12px;border-radius:8px;font-size:12px;font-weight:500;background:' + T.btnSecBg + ';color:' + T.textSecond + ';border:none;cursor:pointer;">'
