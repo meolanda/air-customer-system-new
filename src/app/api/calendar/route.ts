@@ -6,10 +6,10 @@ import { checkRateLimit, rateLimitResponse } from '@/lib/api-middleware'
 const CalendarSchema = z.object({
   requestNo: z.string().min(1),
   customerName: z.string().min(1).max(200),
-  phone: z.string().max(20),
-  address: z.string().max(500).optional(),
+  phone: z.string().max(100),           // เพิ่มจาก 20 → รองรับหลายเบอร์ต่อกัน
+  address: z.string().max(1000).optional(), // เพิ่มจาก 500 → ที่อยู่ยาว
   serviceType: z.string().max(100),
-  description: z.string().max(2000).optional(),
+  description: z.string().max(10000).optional(), // เพิ่มจาก 2000 → รายละเอียดใบเสนอราคา
   appointmentDate: z.string().min(1),
   eventId: z.string().optional(),
 })
