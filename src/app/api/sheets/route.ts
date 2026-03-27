@@ -11,14 +11,14 @@ const RequestSchema = z.object({
   channel: z.enum(['LINE', 'โทร', 'Walk-in', 'Facebook', 'อื่นๆ']),
   customerName: z.string().min(1).max(200),
   contactName: z.string().max(200).optional(),
-  phone: z.string().max(20),
-  address: z.string().max(500),
+  phone: z.string().max(100),           // เพิ่มจาก 20 → มีหลายเบอร์ต่อกัน เช่น "085-xxx / 02-xxx"
+  address: z.string().max(1000),        // เพิ่มจาก 500 → ที่อยู่ยาว
   serviceType: z.string().max(100),
-  description: z.string().max(2000),
+  description: z.string().max(10000),   // เพิ่มจาก 2000 → รายละเอียดใบเสนอราคายาวมาก
   priority: z.enum(['normal', 'urgent', 'emergency']),
   status: z.enum(['new', 'queue', 'waiting_quote', 'checking_parts', 'order_parts', 'send_quote', 'waiting_response', 'completed', 'cancelled']),
   appointmentDate: z.string(),
-  notes: z.string().max(500),
+  notes: z.string().max(2000),          // เพิ่มจาก 500 → หมายเหตุอาจยาว
   imageUrl: z.string(),
   history: z.array(z.object({ status: z.string(), date: z.string(), by: z.string() })),
   calendarEventId: z.string().optional(),
