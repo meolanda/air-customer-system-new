@@ -16,7 +16,7 @@ const RequestSchema = z.object({
   serviceType: z.string().max(100),
   description: z.string().max(2000),
   priority: z.enum(['normal', 'urgent', 'emergency']),
-  status: z.enum(['new', 'queue', 'waiting_quote', 'checking_parts', 'send_quote', 'waiting_response', 'completed', 'cancelled']),
+  status: z.enum(['new', 'queue', 'waiting_quote', 'checking_parts', 'order_parts', 'send_quote', 'waiting_response', 'completed', 'cancelled']),
   appointmentDate: z.string(),
   notes: z.string().max(500),
   imageUrl: z.string(),
