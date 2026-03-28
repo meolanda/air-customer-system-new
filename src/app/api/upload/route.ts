@@ -42,21 +42,28 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Validate file type (images + PDF)
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf']
-    if (!allowedTypes.includes(file.type) && !file.name.match(/\.(pdf|jpg|jpeg|png|gif|webp)$/i)) {
+    // Validate file type (images + PDF + Excel + Word)
+    const allowedTypes = [
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ]
+    if (!allowedTypes.includes(file.type) && !file.name.match(/\.(pdf|doc|docx|xls|xlsx|jpg|jpeg|png|gif|webp)$/i)) {
       return NextResponse.json(
-        { error: 'Invalid file type. Only images and PDF are allowed.' },
+        { error: 'Invalid file type. Only images, PDF, Word, and Excel are allowed.' },
         { status: 400 }
       )
     }
 
-    // Validate file size (images 10MB, PDF 20MB)
-    const isPdf = file.type === 'application/pdf' || file.name.match(/\.pdf$/i)
-    const maxSize = isPdf ? 20 * 1024 * 1024 : 10 * 1024 * 1024
+    // Validate file size (images 10MB, documents 20MB)
+    const isDoc = file.type === 'application/pdf' || file.name.match(/\.(pdf|doc|docx|xls|xlsx)$/i)
+    const maxSize = isDoc ? 20 * 1024 * 1024 : 10 * 1024 * 1024
     if (file.size > maxSize) {
       return NextResponse.json(
-        { error: isPdf ? 'File size exceeds 20MB limit' : 'File size exceeds 10MB limit' },
+        { error: isDoc ? 'File size exceeds 20MB limit' : 'File size exceeds 10MB limit' },
         { status: 400 }
       )
     }
