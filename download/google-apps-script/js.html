@@ -1377,8 +1377,8 @@
       + '<label id="pdfUploadLabel" for="pdfInput" style="display:flex; align-items:center; gap:8px; cursor:pointer;'
       + ' padding:10px 14px; border:2px dashed ' + T.inputBorder + '; border-radius:10px;'
       + ' background:' + T.inputBg + '; color:' + T.textSecond + '; font-size:14px; margin-top:4px;">'
-      + '📎 ' + (state.formData.pdfUrl ? escapeHtml(state.formData.pdfFileName || 'ไฟล์ที่แนบแล้ว') : 'เลือกไฟล์ PDF, DOC, DOCX (สูงสุด 20MB)') + '</label>'
-      + '<input type="file" id="pdfInput" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"'
+      + '📎 ' + (state.formData.pdfUrl ? escapeHtml(state.formData.pdfFileName || 'ไฟล์ที่แนบแล้ว') : 'เลือกไฟล์ PDF, DOC, DOCX, XLS, XLSX (สูงสุด 20MB)') + '</label>'
+      + '<input type="file" id="pdfInput" accept=".pdf,.doc,.docx,.xls,.xlsx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"'
       + ' style="display:none;">'
       + (state.formData.pdfUrl
           ? '<div style="margin-top:6px; display:flex; align-items:center; gap:8px;">'
