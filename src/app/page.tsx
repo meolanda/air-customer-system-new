@@ -662,13 +662,20 @@ export default function Home() {
     const file = e.target.files?.[0]
     if (!file) return
 
-    const isPdf = file.type === 'application/pdf' || file.name.match(/\.pdf$/i)
-    if (!isPdf) {
-      alert('รองรับเฉพาะไฟล์ PDF เท่านั้น')
+    const allowedTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ]
+    const isAllowed = allowedTypes.includes(file.type) || file.name.match(/\.(pdf|doc|docx|xls|xlsx)$/i)
+    if (!isAllowed) {
+      alert('รองรับเฉพาะไฟล์ PDF, DOC, DOCX, XLS, XLSX เท่านั้น')
       return
     }
     if (file.size > 20 * 1024 * 1024) {
-      alert('ไฟล์ PDF ใหญ่เกิน 20MB')
+      alert('ไฟล์ใหญ่เกิน 20MB')
       return
     }
 
@@ -1500,7 +1507,7 @@ export default function Home() {
                           <div className="border-2 border-dashed border-indigo-200 rounded-lg p-3 text-center">
                             <input
                               type="file"
-                              accept="application/pdf,.pdf"
+                              accept=".pdf,.doc,.docx,.xls,.xlsx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                               onChange={handlePdfUpload}
                               className="hidden"
                               id="ai-pdf-upload"
@@ -1759,7 +1766,7 @@ export default function Home() {
 
               {/* PDF Upload */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">📄 แนบไฟล์ PDF (ใบเสนอราคา / เอกสาร)</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">📄 แนบไฟล์ (ใบเสนอราคา / เอกสาร)</label>
                 <div className="space-y-2">
                   {formData.pdfUrl ? (
                     <div className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-200 rounded-xl">
@@ -1815,8 +1822,8 @@ export default function Home() {
                         ) : (
                           <>
                             <div className="text-3xl mb-2">📎</div>
-                            <p className="text-sm text-slate-500">คลิกเพื่ออัปโหลด PDF</p>
-                            <p className="text-xs text-slate-400">รองรับ PDF (สูงสุด 20MB) — AI จะอ่านข้อมูลให้อัตโนมัติ</p>
+                            <p className="text-sm text-slate-500">คลิกเพื่ออัปโหลดไฟล์</p>
+                            <p className="text-xs text-slate-400">รองรับ PDF, DOC, DOCX, XLS, XLSX (สูงสุด 20MB)</p>
                           </>
                         )}
                       </label>
