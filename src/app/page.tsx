@@ -31,8 +31,10 @@ interface ServiceRequest {
   isAllDay?: boolean
   notes: string
   imageUrl: string
+  imageUrls?: string[]
   pdfUrl?: string
   pdfFileName?: string
+  attachments?: { url: string; name: string }[]
   history: { status: Status; date: string; by: string }[]
   calendarEventId?: string
   calendarEventUrl?: string
@@ -132,8 +134,10 @@ export default function Home() {
     isAllDay: false,
     notes: '',
     imageUrl: '',
+    imageUrls: [],
     pdfUrl: '',
-    pdfFileName: ''
+    pdfFileName: '',
+    attachments: []
   })
 
   // Load user and auth state from storage
@@ -483,9 +487,11 @@ export default function Home() {
           appointmentEndDate: formData.appointmentEndDate || '',
           isAllDay: formData.isAllDay || false,
           notes: formData.notes || '',
-          imageUrl: formData.imageUrl || '',
-          pdfUrl: formData.pdfUrl || '',
-          pdfFileName: formData.pdfFileName || '',
+          imageUrl: (formData.imageUrls && formData.imageUrls[0]) || formData.imageUrl || '',
+          imageUrls: formData.imageUrls || [],
+          pdfUrl: formData.attachments?.[0]?.url || formData.pdfUrl || '',
+          pdfFileName: formData.attachments?.[0]?.name || formData.pdfFileName || '',
+          attachments: formData.attachments || [],
           history: [{ status: 'new', date: new Date().toISOString(), by: user?.name || 'System' }]
         }
 
@@ -513,7 +519,12 @@ export default function Home() {
   const openModal = useCallback((request?: ServiceRequest) => {
     if (request) {
       setEditingRequest(request)
-      setFormData(request)
+      // Migrate old single-image/file records to arrays
+      const imageUrls = request.imageUrls?.length ? request.imageUrls : request.imageUrl ? [request.imageUrl] : []
+      const attachments = request.attachments?.length
+        ? request.attachments
+        : request.pdfUrl ? [{ url: request.pdfUrl, name: request.pdfFileName || 'ไฟล์' }] : []
+      setFormData({ ...request, imageUrls, attachments })
     } else {
       setEditingRequest(null)
       setFormData({
@@ -531,8 +542,10 @@ export default function Home() {
         isAllDay: false,
         notes: '',
         imageUrl: '',
+        imageUrls: [],
         pdfUrl: '',
-        pdfFileName: ''
+        pdfFileName: '',
+        attachments: []
       })
     }
     setIsModalOpen(true)
@@ -643,18 +656,25 @@ export default function Home() {
     })
   }
 
-  // Handle file input change
+  // Handle file input change (multiple images)
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
 
-    setPendingDriveFile(file)
-    const url = await uploadImage(file)
-    if (url) {
-      setFormData(prev => ({ ...prev, imageUrl: url }))
-    } else {
-      alert('อัปโหลดรูปไม่สำเร็จ')
+    for (const file of files) {
+      setPendingDriveFile(file)
+      const url = await uploadImage(file)
+      if (url) {
+        setFormData(prev => ({
+          ...prev,
+          imageUrls: [...(prev.imageUrls || []), url],
+          imageUrl: prev.imageUrl || url
+        }))
+      } else {
+        alert(`อัปโหลดรูป ${file.name} ไม่สำเร็จ`)
+      }
     }
+    e.target.value = ''
   }
 
   // PDF Upload Handler
@@ -692,10 +712,12 @@ export default function Home() {
       const data = await res.json()
 
       if (data.success) {
+        const fileUrl = data.data.webViewLink || data.data.directUrl
         setFormData(prev => ({
           ...prev,
-          pdfUrl: data.data.webViewLink || data.data.directUrl,
-          pdfFileName: file.name
+          pdfUrl: prev.pdfUrl || fileUrl,
+          pdfFileName: prev.pdfFileName || file.name,
+          attachments: [...(prev.attachments || []), { url: fileUrl, name: file.name }]
         }))
         // Store base64 for AI analysis
         const reader = new FileReader()
@@ -1252,34 +1274,48 @@ export default function Home() {
                   {request.address && <div className="text-xs text-slate-400 mt-1">📍 {request.address}</div>}
                 </div>
 
-                {/* Image Preview */}
-                {request.imageUrl && (
-                  <div className="mb-3">
-                    <img
-                      src={request.imageUrl}
-                      alt="รูปภาพ"
-                      className="w-full max-w-xs rounded-xl border border-slate-200"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none'
-                      }}
-                    />
-                  </div>
-                )}
+                {/* Image Preview (multiple) */}
+                {(() => {
+                  const imgs = request.imageUrls?.length ? request.imageUrls : request.imageUrl ? [request.imageUrl] : []
+                  return imgs.length > 0 ? (
+                    <div className={`mb-3 ${imgs.length > 1 ? 'grid grid-cols-2 gap-1' : ''}`}>
+                      {imgs.map((url, i) => (
+                        <img
+                          key={i}
+                          src={url}
+                          alt={`รูปภาพ ${i + 1}`}
+                          className="w-full rounded-xl border border-slate-200"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                        />
+                      ))}
+                    </div>
+                  ) : null
+                })()}
 
-                {/* PDF Link */}
-                {request.pdfUrl && (
-                  <div className="mb-3">
-                    <a
-                      href={request.pdfUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg border border-slate-200"
-                    >
-                      <span>📄</span>
-                      <span className="truncate max-w-[200px]">{request.pdfFileName || 'เปิดดูไฟล์ PDF'}</span>
-                    </a>
-                  </div>
-                )}
+                {/* File Links (multiple) */}
+                {(() => {
+                  const files = request.attachments?.length
+                    ? request.attachments
+                    : request.pdfUrl
+                      ? [{ url: request.pdfUrl, name: request.pdfFileName || 'เปิดดูไฟล์' }]
+                      : []
+                  return files.length > 0 ? (
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      {files.map((f, i) => (
+                        <a
+                          key={i}
+                          href={f.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg border border-slate-200"
+                        >
+                          <span>📄</span>
+                          <span className="truncate max-w-[200px]">{f.name}</span>
+                        </a>
+                      ))}
+                    </div>
+                  ) : null
+                })()}
 
                 <div className="flex items-center gap-2 mb-3 text-sm">
                   <span className="bg-slate-100 px-2 py-1 rounded text-slate-600">{request.serviceType}</span>
@@ -1712,123 +1748,114 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Image Upload */}
+              {/* Image Upload (multiple) */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">📷 รูปภาพ</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">📷 รูปภาพ (แนบได้หลายรูป)</label>
                 <div className="space-y-2">
-                  {formData.imageUrl ? (
-                    <div className="relative">
-                      <img
-                        src={formData.imageUrl}
-                        alt="Preview"
-                        className="w-full max-w-xs rounded-xl border border-slate-200"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setFormData(prev => ({ ...prev, imageUrl: '' }))}
-                        className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full text-xs"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleFileChange}
-                        className="hidden"
-                        id="image-upload"
-                      />
-                      <label htmlFor="image-upload" className="cursor-pointer">
-                        {uploadProgress !== null ? (
-                          <div className="space-y-2">
-                            <div className="w-full bg-slate-200 rounded-full h-2">
-                              <div
-                                className="bg-blue-500 h-2 rounded-full transition-all"
-                                style={{ width: `${uploadProgress}%` }}
-                              />
-                            </div>
-                            <p className="text-sm text-slate-500">กำลังอัปโหลด...</p>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="text-3xl mb-2">📤</div>
-                            <p className="text-sm text-slate-500">คลิกเพื่ออัปโหลดรูปภาพ</p>
-                            <p className="text-xs text-slate-400">รองรับ JPG, PNG, GIF (สูงสุด 10MB)</p>
-                          </>
-                        )}
-                      </label>
+                  {/* Preview grid */}
+                  {(formData.imageUrls?.length ?? 0) > 0 && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {formData.imageUrls!.map((url, i) => (
+                        <div key={i} className="relative">
+                          <img src={url} alt={`รูป ${i + 1}`} className="w-full rounded-xl border border-slate-200 object-cover aspect-square" />
+                          <button
+                            type="button"
+                            onClick={() => setFormData(prev => {
+                              const next = (prev.imageUrls || []).filter((_, idx) => idx !== i)
+                              return { ...prev, imageUrls: next, imageUrl: next[0] || '' }
+                            })}
+                            className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full text-xs leading-none"
+                          >✕</button>
+                        </div>
+                      ))}
                     </div>
                   )}
+                  {/* Add more / first upload button */}
+                  <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleFileChange}
+                      className="hidden"
+                      id="image-upload"
+                    />
+                    <label htmlFor="image-upload" className="cursor-pointer">
+                      {uploadProgress !== null ? (
+                        <div className="space-y-2">
+                          <div className="w-full bg-slate-200 rounded-full h-2">
+                            <div className="bg-blue-500 h-2 rounded-full transition-all" style={{ width: `${uploadProgress}%` }} />
+                          </div>
+                          <p className="text-sm text-slate-500">กำลังอัปโหลด...</p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="text-3xl mb-2">📤</div>
+                          <p className="text-sm text-slate-500">
+                            {(formData.imageUrls?.length ?? 0) > 0 ? '+ เพิ่มรูปภาพ' : 'คลิกเพื่ออัปโหลดรูปภาพ'}
+                          </p>
+                          <p className="text-xs text-slate-400">รองรับ JPG, PNG, GIF (สูงสุด 10MB)</p>
+                        </>
+                      )}
+                    </label>
+                  </div>
                 </div>
               </div>
 
-              {/* PDF Upload */}
+              {/* File Upload (multiple) */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">📄 แนบไฟล์ (ใบเสนอราคา / เอกสาร)</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">📄 แนบไฟล์ (แนบได้หลายไฟล์)</label>
                 <div className="space-y-2">
-                  {formData.pdfUrl ? (
-                    <div className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-200 rounded-xl">
-                      <span className="text-2xl">📄</span>
-                      <div className="flex-1 min-w-0">
-                        <a
-                          href={formData.pdfUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-sm text-blue-600 underline truncate block"
-                        >
-                          {formData.pdfFileName || 'เปิดดูไฟล์ PDF'}
-                        </a>
-                      </div>
-                      <div className="flex gap-2 shrink-0">
-                        {pdfBase64 && (
+                  {/* List of uploaded files */}
+                  {(formData.attachments?.length ?? 0) > 0 && (
+                    <div className="space-y-1">
+                      {formData.attachments!.map((f, i) => (
+                        <div key={i} className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-200 rounded-xl">
+                          <span className="text-xl">📄</span>
+                          <a href={f.url} target="_blank" rel="noreferrer" className="text-sm text-blue-600 underline truncate flex-1">{f.name}</a>
                           <button
                             type="button"
-                            onClick={handlePdfAnalyze}
-                            disabled={isPdfAnalyzing}
-                            className="px-3 py-1 bg-purple-600 text-white text-xs rounded-lg disabled:opacity-50"
-                          >
-                            {isPdfAnalyzing ? '⏳ กำลังอ่าน...' : '🤖 AI อ่าน PDF'}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFormData(prev => ({ ...prev, pdfUrl: '', pdfFileName: '' }))
-                            setPdfBase64('')
-                          }}
-                          className="px-2 py-1 bg-red-500 text-white text-xs rounded-lg"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center">
-                      <input
-                        type="file"
-                        accept="application/pdf,.pdf"
-                        onChange={handlePdfUpload}
-                        className="hidden"
-                        id="pdf-upload"
-                      />
-                      <label htmlFor="pdf-upload" className="cursor-pointer">
-                        {isPdfUploading ? (
-                          <div className="space-y-1">
-                            <div className="text-2xl">⏳</div>
-                            <p className="text-sm text-slate-500">กำลังอัปโหลด PDF...</p>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="text-3xl mb-2">📎</div>
-                            <p className="text-sm text-slate-500">คลิกเพื่ออัปโหลดไฟล์</p>
-                            <p className="text-xs text-slate-400">รองรับ PDF, DOC, DOCX, XLS, XLSX (สูงสุด 20MB)</p>
-                          </>
-                        )}
-                      </label>
+                            onClick={() => setFormData(prev => {
+                              const next = (prev.attachments || []).filter((_, idx) => idx !== i)
+                              return {
+                                ...prev,
+                                attachments: next,
+                                pdfUrl: next[0]?.url || '',
+                                pdfFileName: next[0]?.name || ''
+                              }
+                            })}
+                            className="px-2 py-1 bg-red-500 text-white text-xs rounded-lg shrink-0"
+                          >✕</button>
+                        </div>
+                      ))}
                     </div>
                   )}
+                  {/* Add file button */}
+                  <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center">
+                    <input
+                      type="file"
+                      accept="application/pdf,.pdf,.doc,.docx,.xls,.xlsx"
+                      onChange={handlePdfUpload}
+                      className="hidden"
+                      id="pdf-upload"
+                    />
+                    <label htmlFor="pdf-upload" className="cursor-pointer">
+                      {isPdfUploading ? (
+                        <div className="space-y-1">
+                          <div className="text-2xl">⏳</div>
+                          <p className="text-sm text-slate-500">กำลังอัปโหลด...</p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="text-3xl mb-2">📎</div>
+                          <p className="text-sm text-slate-500">
+                            {(formData.attachments?.length ?? 0) > 0 ? '+ เพิ่มไฟล์' : 'คลิกเพื่ออัปโหลดไฟล์'}
+                          </p>
+                          <p className="text-xs text-slate-400">รองรับ PDF, DOC, DOCX, XLS, XLSX (สูงสุด 20MB)</p>
+                        </>
+                      )}
+                    </label>
+                    </div>
                 </div>
               </div>
 
