@@ -677,10 +677,10 @@ export default function Home() {
     e.target.value = ''
   }
 
-  // PDF Upload Handler
+  // PDF Upload Handler (multiple files)
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
 
     const allowedTypes = [
       'application/pdf',
@@ -689,50 +689,53 @@ export default function Home() {
       'application/vnd.ms-excel',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     ]
-    const isAllowed = allowedTypes.includes(file.type) || file.name.match(/\.(pdf|doc|docx|xls|xlsx)$/i)
-    if (!isAllowed) {
-      alert('รองรับเฉพาะไฟล์ PDF, DOC, DOCX, XLS, XLSX เท่านั้น')
-      return
-    }
-    if (file.size > 20 * 1024 * 1024) {
-      alert('ไฟล์ใหญ่เกิน 20MB')
-      return
-    }
 
     setIsPdfUploading(true)
     try {
-      // Upload to Google Drive
-      const form = new FormData()
-      form.append('file', file)
-      const params = new URLSearchParams({
-        customerName: formData.customerName || '',
-        address: formData.address || ''
-      })
-      const res = await fetch(`/api/upload?${params}`, { method: 'POST', body: form })
-      const data = await res.json()
-
-      if (data.success) {
-        const fileUrl = data.data.webViewLink || data.data.directUrl
-        setFormData(prev => ({
-          ...prev,
-          pdfUrl: prev.pdfUrl || fileUrl,
-          pdfFileName: prev.pdfFileName || file.name,
-          attachments: [...(prev.attachments || []), { url: fileUrl, name: file.name }]
-        }))
-        // Store base64 for AI analysis
-        const reader = new FileReader()
-        reader.onload = (ev) => {
-          if (ev.target?.result) setPdfBase64(ev.target.result as string)
+      for (const file of files) {
+        const isAllowed = allowedTypes.includes(file.type) || file.name.match(/\.(pdf|doc|docx|xls|xlsx)$/i)
+        if (!isAllowed) {
+          alert(`${file.name}: รองรับเฉพาะไฟล์ PDF, DOC, DOCX, XLS, XLSX เท่านั้น`)
+          continue
         }
-        reader.readAsDataURL(file)
-      } else {
-        alert('อัปโหลด PDF ไม่สำเร็จ: ' + (data.error || 'เกิดข้อผิดพลาด'))
+        if (file.size > 20 * 1024 * 1024) {
+          alert(`${file.name}: ไฟล์ใหญ่เกิน 20MB`)
+          continue
+        }
+
+        const form = new FormData()
+        form.append('file', file)
+        const params = new URLSearchParams({
+          customerName: formData.customerName || '',
+          address: formData.address || ''
+        })
+        const res = await fetch(`/api/upload?${params}`, { method: 'POST', body: form })
+        const data = await res.json()
+
+        if (data.success) {
+          const fileUrl = data.data.webViewLink || data.data.directUrl
+          setFormData(prev => ({
+            ...prev,
+            pdfUrl: prev.pdfUrl || fileUrl,
+            pdfFileName: prev.pdfFileName || file.name,
+            attachments: [...(prev.attachments || []), { url: fileUrl, name: file.name }]
+          }))
+          // Store base64 of last file for AI analysis
+          const reader = new FileReader()
+          reader.onload = (ev) => {
+            if (ev.target?.result) setPdfBase64(ev.target.result as string)
+          }
+          reader.readAsDataURL(file)
+        } else {
+          alert(`${file.name}: อัปโหลดไม่สำเร็จ — ${data.error || 'เกิดข้อผิดพลาด'}`)
+        }
       }
     } catch (err) {
       console.error('PDF upload error:', err)
-      alert('อัปโหลด PDF ไม่สำเร็จ')
+      alert('อัปโหลดไฟล์ไม่สำเร็จ')
     } finally {
       setIsPdfUploading(false)
+      e.target.value = ''
     }
   }
 
@@ -1835,6 +1838,7 @@ export default function Home() {
                     <input
                       type="file"
                       accept="application/pdf,.pdf,.doc,.docx,.xls,.xlsx"
+                      multiple
                       onChange={handlePdfUpload}
                       className="hidden"
                       id="pdf-upload"
