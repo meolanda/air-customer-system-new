@@ -1,0 +1,7 @@
+# Ignore everything by default, then whitelist what we need
+**
+!appsscript.json
+!Code.gs
+!index.html
+!css.html
+!js.html
