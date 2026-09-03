@@ -11,6 +11,8 @@ const CalendarSchema = z.object({
   serviceType: z.string().max(100),
   description: z.string().max(10000).optional(), // เพิ่มจาก 2000 → รายละเอียดใบเสนอราคา
   appointmentDate: z.string().min(1),
+  appointmentEndDate: z.string().optional(),
+  isAllDay: z.boolean().optional(),
   eventId: z.string().optional(),
 })
 
@@ -27,6 +29,35 @@ async function getGoogleCalendarClient() {
     return google.calendar({ version: 'v3', auth })
 }
 
+// Parse an appointment date string (date-only, datetime-local, or with timezone) as Bangkok time
+function parseAppointmentDate(value: string, defaultHour: string): Date {
+    const hasTimezone = value.includes('+') || value.endsWith('Z')
+    if (hasTimezone) return new Date(value)
+    if (value.length <= 10) return new Date(`${value}T${defaultHour}:00:00+07:00`)
+    return new Date(`${value}+07:00`)
+}
+
+// Build the start/end of the calendar event from appointmentDate/appointmentEndDate/isAllDay
+function buildEventTimes(appointmentDate: string, appointmentEndDate: string | undefined, isAllDay: boolean | undefined) {
+    const startDate = parseAppointmentDate(appointmentDate, '09')
+    const endDate = appointmentEndDate ? parseAppointmentDate(appointmentEndDate, '17') : new Date(startDate.getTime() + 2 * 60 * 60 * 1000)
+
+    if (isAllDay) {
+        // Google Calendar all-day events use date-only values with an EXCLUSIVE end date
+        const toDateOnly = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' }) // YYYY-MM-DD
+        const exclusiveEnd = new Date(endDate.getTime() + 24 * 60 * 60 * 1000)
+        return {
+            start: { date: toDateOnly(startDate) },
+            end: { date: toDateOnly(exclusiveEnd) },
+        }
+    }
+
+    return {
+        start: { dateTime: startDate.toISOString(), timeZone: 'Asia/Bangkok' },
+        end: { dateTime: endDate.toISOString(), timeZone: 'Asia/Bangkok' },
+    }
+}
+
 export async function POST(request: NextRequest) {
     if (!checkRateLimit(request)) return rateLimitResponse()
     try {
@@ -35,7 +66,7 @@ export async function POST(request: NextRequest) {
         if (!validated.success) {
           return NextResponse.json({ error: 'Invalid request data' }, { status: 400 })
         }
-        const { requestNo, customerName, phone, address, serviceType, description, appointmentDate } = validated.data
+        const { requestNo, customerName, phone, address, serviceType, description, appointmentDate, appointmentEndDate, isAllDay } = validated.data
 
         const calendar = await getGoogleCalendarClient()
         const calendarId = process.env['GOOGLE_CALENDAR_ID']
@@ -51,22 +82,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'appointmentDate is required' }, { status: 400 })
         }
 
-        // Prepare start and end time (Bangkok timezone UTC+7)
-        let startDate: Date
-        const hasTimezone = appointmentDate.includes('+') || appointmentDate.endsWith('Z')
-
-        if (hasTimezone) {
-            // Already has timezone info → parse directly
-            startDate = new Date(appointmentDate)
-        } else if (appointmentDate.length <= 10) {
-            // Date only (YYYY-MM-DD) → default 09:00 Bangkok time
-            startDate = new Date(`${appointmentDate}T09:00:00+07:00`)
-        } else {
-            // datetime-local format "2026-03-18T18:00" → treat as Bangkok time
-            startDate = new Date(`${appointmentDate}+07:00`)
-        }
-
-        const endDate = new Date(startDate.getTime() + 2 * 60 * 60 * 1000) // +2 hours
+        const { start, end } = buildEventTimes(appointmentDate, appointmentEndDate, isAllDay)
 
         // Prepare Event details
         const eventSummary = `[รอจัดช่าง] ${customerName} - ${serviceType}`
@@ -84,14 +100,8 @@ export async function POST(request: NextRequest) {
             summary: eventSummary,
             location: address || '',
             description: eventDescription,
-            start: {
-                dateTime: startDate.toISOString(),
-                timeZone: 'Asia/Bangkok',
-            },
-            end: {
-                dateTime: endDate.toISOString(),
-                timeZone: 'Asia/Bangkok',
-            },
+            start,
+            end,
             colorId: '5' // Yellow color for pending
         }
 
@@ -114,7 +124,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
     try {
         const body = await request.json()
-        const { eventId, requestNo, customerName, phone, address, serviceType, description, appointmentDate } = body
+        const { eventId, requestNo, customerName, phone, address, serviceType, description, appointmentDate, appointmentEndDate, isAllDay } = body
 
         const calendar = await getGoogleCalendarClient()
         const calendarId = process.env['GOOGLE_CALENDAR_ID']
@@ -127,17 +137,7 @@ export async function PUT(request: NextRequest) {
             return NextResponse.json({ error: 'appointmentDate is required' }, { status: 400 })
         }
 
-        // Parse date with Bangkok timezone
-        const hasTimezone = appointmentDate.includes('+') || appointmentDate.endsWith('Z')
-        let startDate: Date
-        if (hasTimezone) {
-            startDate = new Date(appointmentDate)
-        } else if (appointmentDate.length <= 10) {
-            startDate = new Date(`${appointmentDate}T09:00:00+07:00`)
-        } else {
-            startDate = new Date(`${appointmentDate}+07:00`)
-        }
-        const endDate = new Date(startDate.getTime() + 2 * 60 * 60 * 1000)
+        const { start, end } = buildEventTimes(appointmentDate, appointmentEndDate, isAllDay)
 
         const eventSummary = `[รอจัดช่าง] ${customerName} - ${serviceType}`
         let eventDescription = `เลขที่งาน: ${requestNo}\nลูกค้า: ${customerName}\nเบอร์โทร: ${phone}`
@@ -149,8 +149,8 @@ export async function PUT(request: NextRequest) {
             summary: eventSummary,
             location: address || '',
             description: eventDescription,
-            start: { dateTime: startDate.toISOString(), timeZone: 'Asia/Bangkok' },
-            end: { dateTime: endDate.toISOString(), timeZone: 'Asia/Bangkok' },
+            start,
+            end,
             colorId: '5',
         }
 
