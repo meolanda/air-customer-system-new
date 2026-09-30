@@ -6,8 +6,34 @@ import { normalizePrivateKey } from '@/lib/pem'
 export const FIREBASE_DB_URL =
   'https://customer-reception-system-default-rtdb.asia-southeast1.firebasedatabase.app'
 
+// รองรับ 2 แบบ:
+// 1) FIREBASE_SERVICE_ACCOUNT_JSON = เนื้อหาไฟล์ .json ทั้งไฟล์ (หรือ base64 ของไฟล์) — วางง่ายที่สุด ไม่พลาดตอนเลือกข้อความ
+// 2) FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY แยกกัน
+function readServiceAccountJson(): { email: string; key: string } | null {
+  const raw = process.env['FIREBASE_SERVICE_ACCOUNT_JSON']?.trim()
+  if (!raw) return null
+  const candidates = [raw]
+  try {
+    candidates.push(Buffer.from(raw, 'base64').toString('utf8'))
+  } catch {
+    /* ไม่ใช่ base64 */
+  }
+  for (const text of candidates) {
+    try {
+      const parsed = JSON.parse(text) as { client_email?: string; private_key?: string }
+      const key = normalizePrivateKey(parsed.private_key)
+      if (parsed.client_email && key) return { email: parsed.client_email.trim(), key }
+    } catch {
+      /* ลองแบบถัดไป */
+    }
+  }
+  return null
+}
+
 function getCredentials(): { email: string; key: string } | null {
-  const email = process.env['FIREBASE_CLIENT_EMAIL']
+  const fromJson = readServiceAccountJson()
+  if (fromJson) return fromJson
+  const email = process.env['FIREBASE_CLIENT_EMAIL']?.trim().replace(/^["']|["'],?$/g, '')
   const key = normalizePrivateKey(process.env['FIREBASE_PRIVATE_KEY'])
   return email && key ? { email, key } : null
 }
