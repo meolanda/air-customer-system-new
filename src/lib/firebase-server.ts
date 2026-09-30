@@ -1,13 +1,14 @@
 // ฝั่งเซิร์ฟเวอร์เท่านั้น — ใช้ service account ของโปรเจกต์ Firebase (ข้ามกฎ rules ได้)
 import { createSign } from 'crypto'
 import { google } from 'googleapis'
+import { normalizePrivateKey } from '@/lib/pem'
 
 export const FIREBASE_DB_URL =
   'https://customer-reception-system-default-rtdb.asia-southeast1.firebasedatabase.app'
 
 function getCredentials(): { email: string; key: string } | null {
   const email = process.env['FIREBASE_CLIENT_EMAIL']
-  const key = process.env['FIREBASE_PRIVATE_KEY']?.replace(/\n/g, '\n')
+  const key = normalizePrivateKey(process.env['FIREBASE_PRIVATE_KEY'])
   return email && key ? { email, key } : null
 }
 
