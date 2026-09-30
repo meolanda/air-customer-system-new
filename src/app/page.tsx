@@ -4,8 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import * as XLSX from 'xlsx'
 import { ref, onValue, set, update, remove } from 'firebase/database'
 import { signInWithCustomToken, signOut } from 'firebase/auth'
-import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
-import { auth, db, storage } from '../lib/firebase'
+import { auth, db } from '../lib/firebase'
 // Types
 type Status = 'new' | 'queue' | 'waiting_quote' | 'checking_parts' | 'order_parts' | 'send_quote' | 'waiting_response' | 'completed' | 'cancelled'
 
@@ -92,7 +91,6 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
-  const [pendingDriveFile, setPendingDriveFile] = useState<File | null>(null)
   const [viewMode, setViewMode] = useState<'card' | 'table'>('card')
   const [displayLimit, setDisplayLimit] = useState(50)
 
@@ -305,60 +303,63 @@ export default function Home() {
     return `REQ-${dateStr}-${count.toString().padStart(3, '0')}`
   }
 
-  // Upload image to Firebase Storage + backup to Google Drive
-  // Backup รูปไป Google Drive (เรียกตอน submit เพื่อให้ได้ชื่อลูกค้า+สาขา)
-  const backupToDrive = async (file: File, customerName: string, address: string) => {
-    try {
-      const driveForm = new FormData()
-      driveForm.append('file', file)
-      const params = new URLSearchParams({ customerName, address })
-      const driveRes = await fetch(`/api/upload?${params}`, { method: 'POST', body: driveForm })
-      if (!driveRes.ok) {
-        const errText = await driveRes.text()
-        console.warn('Drive backup failed:', driveRes.status, errText)
-      }
-    } catch (driveErr) {
-      console.warn('Drive backup error:', driveErr)
-    }
-  }
-
-  const uploadImage = async (file: File): Promise<string | null> => {
-    try {
-      setUploadProgress(0)
-      const timestamp = Date.now()
-      const ext = file.name.split('.').pop() || 'jpg'
-      const fileName = `${timestamp}.${ext}`
-      const fileRef = storageRef(storage, `job_images/${fileName}`)
-
-      const uploadTask = uploadBytesResumable(fileRef, file)
-
-      return new Promise((resolve, reject) => {
-        uploadTask.on(
-          'state_changed',
-          (snapshot) => {
-            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100
-            setUploadProgress(Math.round(progress))
+  // ย่อรูปก่อนอัปโหลด (Vercel รับ body ได้ไม่เกิน ~4.5MB และรูปจากมือถือมักใหญ่กว่านั้น)
+  const compressImage = (file: File): Promise<File> =>
+    new Promise((resolve) => {
+      if (!file.type.startsWith('image/') || file.type === 'image/gif') return resolve(file)
+      const img = new Image()
+      const objectUrl = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl)
+        const MAX = 1600
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height))
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.round(img.width * scale)
+        canvas.height = Math.round(img.height * scale)
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return resolve(file)
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        canvas.toBlob(
+          (blob) => {
+            if (!blob || blob.size >= file.size) return resolve(file)
+            resolve(new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }))
           },
-          (error) => {
-            console.error('Error uploading image to Firebase:', error)
-            reject(null)
-          },
-          async () => {
-            try {
-              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref)
-              resolve(downloadURL)
-            } catch (err) {
-              console.error('Error getting download URL:', err)
-              resolve(null)
-            } finally {
-              setTimeout(() => setUploadProgress(null), 1000)
-            }
-          }
+          'image/jpeg',
+          0.8
         )
+      }
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl)
+        resolve(file)
+      }
+      img.src = objectUrl
+    })
+
+  // อัปโหลดรูปไป Google Drive ผ่าน /api/upload (ไม่ใช้ Firebase Storage)
+  const uploadImage = async (original: File): Promise<string | null> => {
+    try {
+      setUploadProgress(10)
+      const file = await compressImage(original)
+      setUploadProgress(40)
+      const form = new FormData()
+      form.append('file', file)
+      const params = new URLSearchParams({
+        customerName: formData.customerName || '',
+        address: formData.address || '',
       })
+      const res = await fetch(`/api/upload?${params}`, { method: 'POST', body: form })
+      if (!res.ok) {
+        console.error('Image upload failed:', res.status, await res.text())
+        return null
+      }
+      const json = await res.json()
+      setUploadProgress(100)
+      return (json?.data?.directUrl as string) || null
     } catch (error) {
-      console.error('Error starting upload:', error)
+      console.error('Error uploading image:', error)
       return null
+    } finally {
+      setTimeout(() => setUploadProgress(null), 1000)
     }
   }
 
@@ -466,12 +467,6 @@ export default function Home() {
     if (!formData.customerName || !formData.phone || !formData.address) {
       alert('กรุณากรอกชื่อร้าน/สาขา, เบอร์โทร และที่อยู่ (เป็นช่องบังคับ)')
       return
-    }
-
-    // Backup รูปไป Drive พร้อมชื่อลูกค้า+สาขา
-    if (pendingDriveFile) {
-      backupToDrive(pendingDriveFile, formData.customerName, formData.address)
-      setPendingDriveFile(null)
     }
 
     setIsSaving(true)
@@ -589,7 +584,6 @@ export default function Home() {
     setIsModalOpen(false)
     setEditingRequest(null)
     setUploadProgress(null)
-    setPendingDriveFile(null)
     setPdfBase64('')
   }
 
@@ -696,7 +690,6 @@ export default function Home() {
     if (!files.length) return
 
     for (const file of files) {
-      setPendingDriveFile(file)
       const url = await uploadImage(file)
       if (url) {
         setFormData(prev => ({
