@@ -3,8 +3,9 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import * as XLSX from 'xlsx'
 import { ref, onValue, set, update, remove } from 'firebase/database'
+import { signInWithCustomToken, signOut } from 'firebase/auth'
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
-import { db, storage } from '../lib/firebase'
+import { auth, db, storage } from '../lib/firebase'
 // Types
 type Status = 'new' | 'queue' | 'waiting_quote' | 'checking_parts' | 'order_parts' | 'send_quote' | 'waiting_response' | 'completed' | 'cancelled'
 
@@ -115,6 +116,8 @@ export default function Home() {
 
   // Auth State (PIN)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [authChecked, setAuthChecked] = useState(false)
+  const [firebaseReady, setFirebaseReady] = useState(false)
   const [pinInput, setPinInput] = useState('')
   const [pinError, setPinError] = useState('')
 
@@ -145,13 +148,43 @@ export default function Home() {
     const savedUser = localStorage.getItem('currentUser')
     if (savedUser) setUser(JSON.parse(savedUser))
 
-    const savedAuth = sessionStorage.getItem('isAuthenticated')
-    if (savedAuth === 'true') setIsAuthenticated(true)
+    // ตรวจ session จาก cookie ฝั่งเซิร์ฟเวอร์ (อยู่ได้ 30 วัน ไม่ต้องกรอก PIN ซ้ำบนมือถือ)
+    fetch('/api/auth/session')
+      .then((r) => r.json())
+      .then((d) => setIsAuthenticated(Boolean(d.authenticated)))
+      .catch(() => setIsAuthenticated(false))
+      .finally(() => setAuthChecked(true))
   }, [])
+
+  // ล็อกอิน Firebase ด้วย token ที่เซิร์ฟเวอร์ออกให้หลังผ่าน PIN (เพื่อให้กฎ Firebase ปิดกั้นคนนอกได้)
+  useEffect(() => {
+    if (!isAuthenticated) return
+    let cancelled = false
+    const signIn = async () => {
+      try {
+        if (!auth.currentUser) {
+          const res = await fetch('/api/auth/firebase-token')
+          if (res.ok) {
+            const { token } = await res.json()
+            await signInWithCustomToken(auth, token)
+          } else {
+            console.error('Firebase token unavailable:', res.status)
+          }
+        }
+      } catch (e) {
+        console.error('Firebase sign-in failed:', e)
+      } finally {
+        // ไปต่อเสมอ: ถ้ากฎ Firebase ยังเปิดอยู่จะใช้งานได้ตามเดิม ถ้าปิดแล้วจะขึ้น error ใน console
+        if (!cancelled) setFirebaseReady(true)
+      }
+    }
+    signIn()
+    return () => { cancelled = true }
+  }, [isAuthenticated])
 
   // Sync data from Firebase
   useEffect(() => {
-    if (!user) return
+    if (!user || !firebaseReady) return
 
     setIsLoading(true)
     const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
@@ -174,7 +207,7 @@ export default function Home() {
     })
 
     return () => unsubscribe()
-  }, [user])
+  }, [user, firebaseReady])
 
   // One-time auto-import if database is empty
   useEffect(() => {
@@ -211,7 +244,9 @@ export default function Home() {
     setUser(null)
     localStorage.removeItem('currentUser')
     setIsAuthenticated(false)
-    sessionStorage.removeItem('isAuthenticated')
+    setFirebaseReady(false)
+    signOut(auth).catch(() => {})
+    fetch('/api/auth/session', { method: 'DELETE' }).catch(() => {})
   }
 
   const handleExportExcel = () => {
@@ -252,7 +287,6 @@ export default function Home() {
       })
       if (res.ok) {
         setIsAuthenticated(true)
-        sessionStorage.setItem('isAuthenticated', 'true')
         setPinError('')
       } else {
         setPinError('รหัส PIN ไม่ถูกต้อง')
@@ -948,6 +982,9 @@ export default function Home() {
       setIsAiLoading(false)
     }
   }
+
+  // รอเช็ค session ก่อน ไม่ให้หน้า PIN วูบขึ้นมา
+  if (!authChecked) return <div className="min-h-screen bg-slate-50" />
 
   // === AUTH SCREEN (PIN) ===
   if (!isAuthenticated) {

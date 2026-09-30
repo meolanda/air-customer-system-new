@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { checkRateLimit, rateLimitResponse } from '@/lib/api-middleware'
+import { SESSION_COOKIE, SESSION_MAX_AGE, createSessionToken, pinMatches } from '@/lib/session'
 
 const PinSchema = z.object({
   pin: z.string().min(4).max(20),
@@ -41,14 +42,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
     }
 
-    const correctPin = process.env['STORE_PIN'] || '123456'
-    const isValid = validated.data.pin === correctPin
+    const correctPin = process.env['STORE_PIN']
+    if (!correctPin) {
+      console.error('STORE_PIN is not set')
+      return NextResponse.json({ error: 'Server not configured' }, { status: 500 })
+    }
 
-    if (!isValid) {
+    if (!pinMatches(validated.data.pin, correctPin)) {
       return NextResponse.json({ error: 'PIN ไม่ถูกต้อง' }, { status: 401 })
     }
 
-    return NextResponse.json({ success: true })
+    const token = await createSessionToken()
+    if (!token) return NextResponse.json({ error: 'Server error' }, { status: 500 })
+
+    const res = NextResponse.json({ success: true })
+    res.cookies.set(SESSION_COOKIE, token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: SESSION_MAX_AGE,
+    })
+    return res
   } catch {
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
