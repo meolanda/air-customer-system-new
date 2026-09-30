@@ -1,7 +1,6 @@
 import { google } from 'googleapis'
 import { NextResponse } from 'next/server'
-import { ref, set } from 'firebase/database'
-import { db } from '@/lib/firebase'
+import { firebaseAdminSet } from '@/lib/firebase-server'
 
 export async function GET() {
     try {
@@ -76,7 +75,7 @@ export async function GET() {
             }
 
             // Save mapped request to Firebase
-            await set(ref(db, `serviceRequests/${requestData.id}`), requestData)
+            await firebaseAdminSet(`serviceRequests/${requestData.id}`, requestData)
             importedCount++
         }
 
