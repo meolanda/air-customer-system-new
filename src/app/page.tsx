@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx'
 import { ref, onValue, set, update, remove } from 'firebase/database'
 import { signInWithCustomToken, signOut } from 'firebase/auth'
 import { auth, db } from '../lib/firebase'
+import { demoRequests } from '../lib/demo-data'
 // Types
 type Status = 'new' | 'queue' | 'waiting_quote' | 'checking_parts' | 'order_parts' | 'send_quote' | 'waiting_response' | 'completed' | 'cancelled'
 
@@ -80,6 +81,8 @@ const STATUS_TRANSITIONS: Record<Status, Status[]> = {
   cancelled: []
 }
 
+const TODO_STATUSES = ['new', 'queue', 'waiting_quote', 'checking_parts', 'order_parts', 'send_quote', 'waiting_response']
+
 export default function Home() {
   const [user, setUser] = useState<User | null>(null)
   const [newNameInput, setNewNameInput] = useState('')
@@ -92,7 +95,8 @@ export default function Home() {
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [viewMode, setViewMode] = useState<'card' | 'table'>('card')
-  const [displayLimit, setDisplayLimit] = useState(50)
+  const [displayLimit, setDisplayLimit] = useState(20)
+  const [quickFilter, setQuickFilter] = useState<'all' | 'todo' | 'done'>('all')
 
   // AI State
   const [isAiLoading, setIsAiLoading] = useState(false)
@@ -184,6 +188,13 @@ export default function Home() {
   useEffect(() => {
     if (!user || !firebaseReady) return
 
+    // โหมดข้อมูลตัวอย่าง (dev เท่านั้น): เปิดหน้าเว็บด้วย ?demo
+    if (process.env.NODE_ENV === 'development' && new URLSearchParams(window.location.search).has('demo')) {
+      setRequests(demoRequests() as unknown as ServiceRequest[])
+      setIsLoading(false)
+      return
+    }
+
     setIsLoading(true)
     const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
     const requestsRef = ref(db, 'serviceRequests')
@@ -206,6 +217,14 @@ export default function Home() {
 
     return () => unsubscribe()
   }, [user, firebaseReady])
+
+  // ล็อกการเลื่อนของหน้าด้านหลังตอนเปิดฟอร์ม (กันหน้าเลื่อนตามบนมือถือ)
+  useEffect(() => {
+    if (!isModalOpen) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = previous }
+  }, [isModalOpen])
 
   // One-time auto-import if database is empty
   useEffect(() => {
@@ -378,21 +397,24 @@ export default function Home() {
       )
     }
 
+    // Quick filter (แตะที่การ์ดสรุปด้านบน)
+    if (quickFilter === 'todo') filtered = filtered.filter(r => TODO_STATUSES.includes(r.status))
+    if (quickFilter === 'done') filtered = filtered.filter(r => r.status === 'completed')
+
     // Status filter
     if (statusFilter !== 'all') {
       filtered = filtered.filter(r => r.status === statusFilter)
     }
 
     return filtered
-  }, [requests, user, searchTerm, statusFilter])
+  }, [requests, user, searchTerm, statusFilter, quickFilter])
 
   // Stats for dashboard
   const stats = useMemo(() => {
     if (!user) return { total: 0, todo: 0, done: 0 }
-    const todoStatuses = ['new', 'queue', 'waiting_quote', 'checking_parts', 'order_parts', 'send_quote', 'waiting_response']
     return {
       total: requests.length,
-      todo: requests.filter(r => todoStatuses.includes(r.status)).length,
+      todo: requests.filter(r => TODO_STATUSES.includes(r.status)).length,
       done: requests.filter(r => r.status === 'completed').length
     }
   }, [requests, user])
@@ -1084,58 +1106,84 @@ export default function Home() {
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-blue-500 rounded-xl flex items-center justify-center text-xl text-white">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2 sm:py-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 bg-blue-500 rounded-xl flex items-center justify-center text-lg sm:text-xl text-white shrink-0">
                 ❄️
               </div>
-              <div>
-                <h1 className="text-lg font-bold text-slate-800">ระบบรับงานบริการแอร์</h1>
-                <p className="text-xs text-slate-500">👤 {user.name}</p>
+              <div className="min-w-0">
+                <h1 className="text-base sm:text-lg font-bold text-slate-800 truncate">ระบบรับงานบริการแอร์</h1>
+                <p className="text-xs text-slate-500 truncate">👤 {user.name}</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              {/* Storage indicator - Removed as Firebase handles it */}
+            <div className="flex items-center gap-2 shrink-0">
+              {/* บนมือถือใช้ปุ่มลอยมุมขวาล่างแทน */}
               <button
                 onClick={() => openModal()}
-                className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-1"
+                className="hidden sm:flex bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-medium items-center gap-1 whitespace-nowrap"
               >
                 <span>+</span> เพิ่มงาน
               </button>
               <button
                 onClick={handleExportExcel}
-                className="bg-green-500 hover:bg-green-600 text-white px-3 py-2 rounded-xl text-sm font-medium"
+                className="bg-green-500 hover:bg-green-600 text-white px-3 min-h-[40px] rounded-xl text-sm font-medium whitespace-nowrap"
                 title="Export Excel"
+                aria-label="Export Excel"
               >
-                📥 Excel
+                📥<span className="hidden sm:inline"> Excel</span>
               </button>
               <button
                 onClick={handleLogout}
-                className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-xl text-sm"
+                className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 min-h-[40px] rounded-xl text-sm whitespace-nowrap"
               >
-                ออกจากระบบ
+                <span className="sm:hidden">ออก</span>
+                <span className="hidden sm:inline">ออกจากระบบ</span>
               </button>
             </div>
           </div>
         </div>
       </header>
 
+      {/* ปุ่มเพิ่มงานลอย (มือถือ) */}
+      {!isModalOpen && (
+        <button
+          onClick={() => openModal()}
+          className="sm:hidden fixed right-4 z-40 h-14 px-5 rounded-full bg-blue-500 active:bg-blue-600 text-white font-medium shadow-lg flex items-center gap-2"
+          style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+          aria-label="เพิ่มงานใหม่"
+        >
+          <span className="text-2xl leading-none">+</span> เพิ่มงาน
+        </button>
+      )}
+
       <main className="max-w-7xl mx-auto px-4 py-4 space-y-4">
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200">
-            <div className="text-3xl font-bold text-slate-800">{stats.total}</div>
+        {/* Stats (แตะเพื่อกรองรายการ) */}
+        <div className="grid grid-cols-3 gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={() => setQuickFilter('all')}
+            className={`text-left bg-white rounded-2xl p-3 sm:p-4 shadow-sm border ${quickFilter === 'all' ? 'border-blue-400 ring-2 ring-blue-200' : 'border-slate-200'}`}
+          >
+            <div className="text-2xl sm:text-3xl font-bold text-slate-800">{stats.total}</div>
             <div className="text-xs text-slate-500">งานทั้งหมด</div>
-          </div>
-          <div className="bg-white rounded-2xl p-4 shadow-sm border border-amber-200 bg-amber-50">
-            <div className="text-3xl font-bold text-amber-600">{stats.todo}</div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setQuickFilter(quickFilter === 'todo' ? 'all' : 'todo')}
+            className={`text-left rounded-2xl p-3 sm:p-4 shadow-sm border bg-amber-50 ${quickFilter === 'todo' ? 'border-amber-400 ring-2 ring-amber-200' : 'border-amber-200'}`}
+          >
+            <div className="text-2xl sm:text-3xl font-bold text-amber-600">{stats.todo}</div>
             <div className="text-xs text-amber-600">รอดำเนินการ</div>
-          </div>
-          <div className="bg-white rounded-2xl p-4 shadow-sm border border-green-200 bg-green-50">
-            <div className="text-3xl font-bold text-green-600">{stats.done}</div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setQuickFilter(quickFilter === 'done' ? 'all' : 'done')}
+            className={`text-left rounded-2xl p-3 sm:p-4 shadow-sm border bg-green-50 ${quickFilter === 'done' ? 'border-green-400 ring-2 ring-green-200' : 'border-green-200'}`}
+          >
+            <div className="text-2xl sm:text-3xl font-bold text-green-600">{stats.done}</div>
             <div className="text-xs text-green-600">เสร็จสิ้น</div>
-          </div>
+          </button>
         </div>
 
         {/* Search */}
@@ -1283,19 +1331,18 @@ export default function Home() {
           <div className="space-y-3 sm:grid sm:grid-cols-2 sm:gap-4 sm:space-y-0 lg:grid-cols-3">
             {departmentRequests.slice(0, displayLimit).map((request) => (
               <div key={request.id} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200">
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <span className="text-xs font-mono text-blue-600">
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span className="text-xs font-mono text-blue-600 whitespace-nowrap">
                       {request.calendarEventUrl ? (
                         <a href={request.calendarEventUrl} target="_blank" rel="noreferrer" className="hover:underline" title="เปิดปฏิทิน">📅 {request.requestNo}</a>
                       ) : (
                         request.requestNo
                       )}
                     </span>
-                    <span className="mx-2 text-slate-300">|</span>
-                    <span className="text-xs text-slate-500">{formatDate(request.createdAt)}</span>
+                    <span className="text-xs text-slate-500 whitespace-nowrap">{formatDate(request.createdAt)}</span>
                   </div>
-                  <span className={`px-2 py-1 rounded-lg text-xs font-medium text-white ${getStatusConfig(request.status).color}`}>
+                  <span className={`px-2 py-1 rounded-lg text-xs font-medium text-white whitespace-nowrap shrink-0 ${getStatusConfig(request.status).color}`}>
                     {getStatusConfig(request.status).icon} {getStatusConfig(request.status).label}
                   </span>
                 </div>
@@ -1368,32 +1415,46 @@ export default function Home() {
                   <p className="text-sm text-slate-500 mb-3 bg-slate-50 rounded-xl p-2">{request.description}</p>
                 )}
 
-                {/* Action Buttons */}
-                <div className="flex flex-wrap gap-2">
-                  {/* Status Change Buttons */}
-                  {STATUS_TRANSITIONS[request.status].map((nextStatus) => (
+                {/* Action Buttons: ปุ่มหลักใหญ่ แตะง่าย / ปุ่มอันตรายซ่อนไว้ใน "เพิ่มเติม" */}
+                <div>
+                  <div className="flex flex-wrap gap-2">
+                    {STATUS_TRANSITIONS[request.status].filter((nextStatus) => nextStatus !== 'cancelled').map((nextStatus) => (
+                      <button
+                        key={nextStatus}
+                        onClick={() => updateStatus(request.id, nextStatus)}
+                        className={`flex-1 min-w-[40%] sm:flex-none min-h-[44px] px-3 rounded-xl text-sm font-medium text-white ${getStatusConfig(nextStatus).color} hover:opacity-90 active:opacity-80 transition-all`}
+                      >
+                        {getStatusConfig(nextStatus).icon} {getStatusConfig(nextStatus).label}
+                      </button>
+                    ))}
                     <button
-                      key={nextStatus}
-                      onClick={() => updateStatus(request.id, nextStatus)}
-                      className={`px-3 py-2 rounded-xl text-xs font-medium text-white ${getStatusConfig(nextStatus).color} hover:opacity-90 transition-all`}
+                      onClick={() => openModal(request)}
+                      className="min-h-[44px] px-4 rounded-xl text-sm font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 active:bg-slate-300"
                     >
-                      {getStatusConfig(nextStatus).icon} {getStatusConfig(nextStatus).label}
+                      ✏️ แก้ไข
                     </button>
-                  ))}
-
-                  {/* Edit/Delete */}
-                  <button
-                    onClick={() => openModal(request)}
-                    className="px-3 py-2 rounded-xl text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  >
-                    ✏️ แก้ไข
-                  </button>
-                  <button
-                    onClick={() => deleteRequest(request.id)}
-                    className="px-3 py-2 rounded-xl text-xs font-medium bg-red-50 text-red-600 hover:bg-red-100"
-                  >
-                    🗑️ ลบ
-                  </button>
+                  </div>
+                  <details className="mt-1">
+                    <summary className="list-none cursor-pointer select-none text-xs text-slate-400 py-2 [&::-webkit-details-marker]:hidden">
+                      ⋯ เพิ่มเติม
+                    </summary>
+                    <div className="flex gap-2 pb-1">
+                      {STATUS_TRANSITIONS[request.status].includes('cancelled') && (
+                        <button
+                          onClick={() => { if (confirm('ยืนยันยกเลิกงานนี้?')) updateStatus(request.id, 'cancelled') }}
+                          className="flex-1 min-h-[44px] rounded-xl text-sm font-medium bg-red-500 text-white hover:opacity-90"
+                        >
+                          ❌ ยกเลิกงาน
+                        </button>
+                      )}
+                      <button
+                        onClick={() => deleteRequest(request.id)}
+                        className="flex-1 min-h-[44px] rounded-xl text-sm font-medium bg-red-50 text-red-600 hover:bg-red-100"
+                      >
+                        🗑️ ลบ
+                      </button>
+                    </div>
+                  </details>
                 </div>
 
                 {/* History */}
@@ -1418,7 +1479,7 @@ export default function Home() {
         {departmentRequests.length > displayLimit && (
           <div className="text-center mt-4">
             <button
-              onClick={() => setDisplayLimit(prev => prev + 50)}
+              onClick={() => setDisplayLimit(prev => prev + 20)}
               className="px-6 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-sm font-medium transition-colors"
             >
               โหลดเพิ่ม ({departmentRequests.length - displayLimit} รายการที่เหลือ)
@@ -1429,8 +1490,8 @@ export default function Home() {
 
       {/* Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
+          <div className="bg-white sm:rounded-2xl w-full sm:max-w-lg h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-y-auto overflow-x-hidden">
             <div className="sticky top-0 bg-white px-4 py-3 border-b flex items-center justify-between">
               <h2 className="font-bold text-lg">
                 {editingRequest ? '✏️ แก้ไขงาน' : '➕ เพิ่มงานใหม่'}
@@ -1911,7 +1972,7 @@ export default function Home() {
 
                 <div className="space-y-2">
                   {/* Start row */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs text-slate-400 w-10 shrink-0">เริ่ม</span>
                     <input
                       type="date"
@@ -1922,7 +1983,7 @@ export default function Home() {
                         const mm = formData.appointmentDate ? formData.appointmentDate.slice(14, 16) : '00'
                         setFormData(prev => ({ ...prev, appointmentDate: datePart ? `${datePart}T${hh}:${mm}` : '' }))
                       }}
-                      className="flex-1 px-3 py-2 border rounded-xl text-sm"
+                      className="flex-1 min-w-[140px] px-3 py-2 border rounded-xl text-sm"
                     />
                     {!formData.isAllDay && (
                       <div className="flex items-center gap-1 shrink-0">
@@ -1956,7 +2017,7 @@ export default function Home() {
 
                   {/* End row */}
                   {formData.appointmentDate && (
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs text-slate-400 w-10 shrink-0">สิ้นสุด</span>
                       <input
                         type="date"
@@ -1968,7 +2029,7 @@ export default function Home() {
                           const mm = formData.appointmentEndDate ? formData.appointmentEndDate.slice(14, 16) : '00'
                           setFormData(prev => ({ ...prev, appointmentEndDate: datePart ? `${datePart}T${hh}:${mm}` : '' }))
                         }}
-                        className="flex-1 px-3 py-2 border rounded-xl text-sm"
+                        className="flex-1 min-w-[140px] px-3 py-2 border rounded-xl text-sm"
                       />
                       {!formData.isAllDay && (
                         <div className="flex items-center gap-1 shrink-0">
@@ -2037,7 +2098,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="sticky bottom-0 bg-white px-4 py-3 border-t flex gap-2">
+            <div className="sticky bottom-0 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t flex gap-2">
               <button
                 onClick={closeModal}
                 className="flex-1 px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-sm font-medium"
