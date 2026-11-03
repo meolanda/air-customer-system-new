@@ -128,11 +128,16 @@ git push origin main   # Vercel auto-deploy
 | Key | ค่า |
 |-----|-----|
 | `NEXT_PUBLIC_GAS_URL` | GAS Web App URL |
+| `GAS_CUSTOMER_URL` | GAS Web App URL (`/exec`) ใช้ค้นลูกค้าเก่าจากปฏิทิน (เรียกจากเซิร์ฟเวอร์เท่านั้น) |
+| `GAS_CUSTOMER_TOKEN` | ต้องตรงกับ Script Property `CUSTOMER_SEARCH_TOKEN` ใน GAS |
 
 ### GAS Script Properties
 | Key | ค่า |
 |-----|-----|
 | `GEMINI_API_KEY` | API Key สำหรับ Gemini Vision |
+| `CUSTOMER_SEARCH_TOKEN` | token กันคนนอกเรียกค้นลูกค้าจากปฏิทิน (`action=searchCustomers`) |
+
+หลัง push GAS ให้รัน `installCustomerIndexTrigger()` หนึ่งครั้งใน Editor เพื่อสร้างดัชนีลูกค้าจากปฏิทินและตั้งให้อัปเดตทุกชั่วโมง
 
 ---
 

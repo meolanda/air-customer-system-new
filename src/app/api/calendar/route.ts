@@ -2,6 +2,7 @@ import { google } from 'googleapis'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { checkRateLimit, rateLimitResponse } from '@/lib/api-middleware'
+import { buildEventDescription, buildEventSummary } from '@/lib/calendar-format'
 
 const CalendarSchema = z.object({
   requestNo: z.string().min(1),
@@ -85,16 +86,8 @@ export async function POST(request: NextRequest) {
         const { start, end } = buildEventTimes(appointmentDate, appointmentEndDate, isAllDay)
 
         // Prepare Event details
-        const eventSummary = `[รอจัดช่าง] ${customerName} - ${serviceType}`
-        let eventDescription = `เลขที่งาน: ${requestNo}\nลูกค้า: ${customerName}\nเบอร์โทร: ${phone}`
-
-        if (address) {
-            eventDescription += `\nสถานที่: ${address}`
-        }
-        if (description) {
-            eventDescription += `\nอาการ/รายละเอียด: ${description}`
-        }
-        eventDescription += `\n\n**กรุณาเปลี่ยนชื่อหัวข้อเพื่อระบุตัวช่างที่รับผิดชอบ**`
+        const eventSummary = buildEventSummary(customerName, address, serviceType)
+        const eventDescription = buildEventDescription({ requestNo, customerName, phone, address, description })
 
         const event = {
             summary: eventSummary,
@@ -139,11 +132,8 @@ export async function PUT(request: NextRequest) {
 
         const { start, end } = buildEventTimes(appointmentDate, appointmentEndDate, isAllDay)
 
-        const eventSummary = `[รอจัดช่าง] ${customerName} - ${serviceType}`
-        let eventDescription = `เลขที่งาน: ${requestNo}\nลูกค้า: ${customerName}\nเบอร์โทร: ${phone}`
-        if (address) eventDescription += `\nสถานที่: ${address}`
-        if (description) eventDescription += `\nอาการ/รายละเอียด: ${description}`
-        eventDescription += `\n\n**กรุณาเปลี่ยนชื่อหัวข้อเพื่อระบุตัวช่างที่รับผิดชอบ**`
+        const eventSummary = buildEventSummary(customerName, address, serviceType)
+        const eventDescription = buildEventDescription({ requestNo, customerName, phone, address, description })
 
         const event = {
             summary: eventSummary,
