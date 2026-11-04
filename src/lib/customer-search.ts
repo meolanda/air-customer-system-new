@@ -22,8 +22,15 @@ export interface CustomerSuggestion {
 // รวมผลจากงานในระบบกับผลจากปฏิทิน: ชื่อเดียวกันรวมเป็นแถวเดียว ใช้ข้อมูลในระบบก่อน ช่องที่ว่างเติมจากปฏิทิน
 export function mergeSuggestions(fromJobs: CustomerSuggestion[], fromCalendar: CustomerSuggestion[], limit = 8): CustomerSuggestion[] {
     const merged = new Map<string, CustomerSuggestion>()
-    for (const s of fromJobs) merged.set(normalizeName(s.customerName), { ...s, source: 'jobs' })
-    for (const c of fromCalendar) {
+    const clean = (s: CustomerSuggestion): CustomerSuggestion => ({
+        ...s,
+        contactName: cleanValue(s.contactName),
+        phone: cleanValue(s.phone),
+        address: cleanValue(s.address),
+    })
+    for (const s of fromJobs) merged.set(normalizeName(s.customerName), { ...clean(s), source: 'jobs' })
+    for (const raw of fromCalendar) {
+        const c = clean(raw)
         const key = normalizeName(c.customerName)
         const cur = merged.get(key)
         if (!cur) {
@@ -43,6 +50,13 @@ export function mergeSuggestions(fromJobs: CustomerSuggestion[], fromCalendar: C
     return [...merged.values()].slice(0, limit)
 }
 
+// งานเก่าบางงานกรอก "*" "-" ฯลฯ เพื่อข้ามช่องบังคับ ถือว่าเป็นค่าว่าง
+const PLACEHOLDER = /^[\s*\-–—_.'"?]*$|^(ไม่มี|ไม่ระบุ|n\/a)$/i
+export const cleanValue = (s?: string): string => {
+    const v = (s ?? '').trim()
+    return PLACEHOLDER.test(v) ? '' : v
+}
+
 const normalizeName = (s: string) => s.toLowerCase().replace(/\s+/g, '')
 const digitsOnly = (s: string) => s.replace(/\D/g, '')
 const timeOf = (s: string) => {
@@ -55,7 +69,11 @@ export function searchCustomers(requests: CustomerSource[], query: string, limit
     const qDigits = digitsOnly(query)
     if (q.length < 2) return []
 
-    const groups = new Map<string, { latest: CustomerSource; count: number }>()
+    // latest = งานล่าสุด (ใช้ชื่อ), withPhone/withAddress = งานล่าสุดที่ช่องนั้นมีค่าจริง (ไม่ใช่ "*" ฯลฯ)
+    type Group = { latest: CustomerSource; withPhone?: CustomerSource; withAddress?: CustomerSource; count: number }
+    const isNewer = (a: CustomerSource, b?: CustomerSource) => !b || timeOf(a.createdAt) >= timeOf(b.createdAt)
+
+    const groups = new Map<string, Group>()
     for (const r of requests) {
         const key = normalizeName(r.customerName ?? '')
         if (!key) continue
@@ -63,13 +81,12 @@ export function searchCustomers(requests: CustomerSource[], query: string, limit
         const matchesPhone = qDigits.length >= 3 && digitsOnly(r.phone ?? '').includes(qDigits)
         if (!matchesName && !matchesPhone) continue
 
-        const group = groups.get(key)
-        if (!group) {
-            groups.set(key, { latest: r, count: 1 })
-        } else {
-            group.count += 1
-            if (timeOf(r.createdAt) >= timeOf(group.latest.createdAt)) group.latest = r
-        }
+        const group = groups.get(key) ?? { latest: r, count: 0 }
+        group.count += 1
+        if (isNewer(r, group.latest)) group.latest = r
+        if (cleanValue(r.phone) && isNewer(r, group.withPhone)) group.withPhone = r
+        if (cleanValue(r.address) && isNewer(r, group.withAddress)) group.withAddress = r
+        groups.set(key, group)
     }
 
     return [...groups.entries()]
@@ -79,11 +96,12 @@ export function searchCustomers(requests: CustomerSource[], query: string, limit
             return aStarts - bStarts || b.count - a.count
         })
         .slice(0, limit)
-        .map(([, { latest, count }]) => ({
+        .map(([, { latest, withPhone, withAddress, count }]) => ({
             customerName: latest.customerName,
-            contactName: latest.contactName ?? '',
-            phone: latest.phone ?? '',
-            address: latest.address ?? '',
+            // ผู้ติดต่อกับเบอร์มาจากงานเดียวกันเสมอ
+            contactName: withPhone ? cleanValue(withPhone.contactName) : cleanValue(latest.contactName),
+            phone: withPhone ? cleanValue(withPhone.phone) : '',
+            address: withAddress ? cleanValue(withAddress.address) : '',
             jobCount: count,
         }))
 }
