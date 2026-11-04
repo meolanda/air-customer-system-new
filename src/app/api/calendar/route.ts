@@ -2,7 +2,7 @@ import { google } from 'googleapis'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { checkRateLimit, rateLimitResponse } from '@/lib/api-middleware'
-import { buildEventDescription, buildEventSummary } from '@/lib/calendar-format'
+import { buildEventDescription, buildEventSummary } from '@/lib/calendar-template'
 
 const CalendarSchema = z.object({
   requestNo: z.string().min(1),
@@ -11,6 +11,12 @@ const CalendarSchema = z.object({
   address: z.string().max(1000).optional(), // เพิ่มจาก 500 → ที่อยู่ยาว
   serviceType: z.string().max(100),
   description: z.string().max(10000).optional(), // เพิ่มจาก 2000 → รายละเอียดใบเสนอราคา
+  contactName: z.string().max(200).optional(),
+  notes: z.string().max(5000).optional(),       // หมายเหตุ/ข้อเน้นย้ำ
+  machines: z.string().max(5000).optional(),
+  parts: z.string().max(5000).optional(),
+  handover: z.string().max(5000).optional(),
+  acInfo: z.string().max(5000).optional(),
   appointmentDate: z.string().min(1),
   appointmentEndDate: z.string().optional(),
   isAllDay: z.boolean().optional(),
@@ -67,7 +73,7 @@ export async function POST(request: NextRequest) {
         if (!validated.success) {
           return NextResponse.json({ error: 'Invalid request data' }, { status: 400 })
         }
-        const { requestNo, customerName, phone, address, serviceType, description, appointmentDate, appointmentEndDate, isAllDay } = validated.data
+        const { requestNo, customerName, phone, contactName, address, serviceType, description, notes, machines, parts, handover, acInfo, appointmentDate, appointmentEndDate, isAllDay } = validated.data
 
         const calendar = await getGoogleCalendarClient()
         const calendarId = process.env['GOOGLE_CALENDAR_ID']
@@ -87,7 +93,7 @@ export async function POST(request: NextRequest) {
 
         // Prepare Event details
         const eventSummary = buildEventSummary(customerName, address, serviceType)
-        const eventDescription = buildEventDescription({ requestNo, customerName, phone, address, description })
+        const eventDescription = buildEventDescription({ requestNo, customerName, phone, contactName, address, description, notes, machines, parts, handover, acInfo })
 
         const event = {
             summary: eventSummary,
@@ -117,7 +123,7 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
     try {
         const body = await request.json()
-        const { eventId, requestNo, customerName, phone, address, serviceType, description, appointmentDate, appointmentEndDate, isAllDay } = body
+        const { eventId, requestNo, customerName, phone, contactName, address, serviceType, description, notes, machines, parts, handover, acInfo, appointmentDate, appointmentEndDate, isAllDay } = body
 
         const calendar = await getGoogleCalendarClient()
         const calendarId = process.env['GOOGLE_CALENDAR_ID']
@@ -133,7 +139,7 @@ export async function PUT(request: NextRequest) {
         const { start, end } = buildEventTimes(appointmentDate, appointmentEndDate, isAllDay)
 
         const eventSummary = buildEventSummary(customerName, address, serviceType)
-        const eventDescription = buildEventDescription({ requestNo, customerName, phone, address, description })
+        const eventDescription = buildEventDescription({ requestNo, customerName, phone, contactName, address, description, notes, machines, parts, handover, acInfo })
 
         const event = {
             summary: eventSummary,
