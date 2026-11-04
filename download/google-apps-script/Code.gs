@@ -934,9 +934,9 @@ function parseCalendarEvent_(title, descriptionHtml, location, startTimeMs) {
     if (map) address = map[0]
   }
 
-  // ข้อกำชับ = บรรทัดหลังคำว่า "สำคัญ" จนถึงเลข QT หรือลิงก์ข้อปฏิบัติ (ตัดบรรทัดเรื่องเงิน)
+  // ข้อกำชับ = บรรทัดหลังคำว่า "สำคัญ" หรือ "เน้นย้ำ" จนถึงเลข QT หรือลิงก์ข้อปฏิบัติ (ตัดบรรทัดเรื่องเงิน)
   let emphasis = ''
-  const idx = lines.findIndex(function (l) { return l.indexOf('สำคัญ') !== -1 })
+  const idx = lines.findIndex(function (l) { return /สำคัญ|เน้นย้ำ/.test(l) })
   if (idx !== -1) {
     const kept = []
     for (let i = idx + 1; i < lines.length; i++) {
