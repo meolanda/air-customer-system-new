@@ -6,6 +6,7 @@ import { ref, onValue, set, update, remove } from 'firebase/database'
 import { signInWithCustomToken, signOut } from 'firebase/auth'
 import { auth, db } from '../lib/firebase'
 import { demoRequests } from '../lib/demo-data'
+import { searchCustomers, mergeSuggestions, type CustomerSuggestion } from '../lib/customer-search'
 // Types
 type Status = 'new' | 'queue' | 'waiting_quote' | 'checking_parts' | 'order_parts' | 'send_quote' | 'waiting_response' | 'completed' | 'cancelled'
 
@@ -92,6 +93,8 @@ export default function Home() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingRequest, setEditingRequest] = useState<ServiceRequest | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
+  const [showCustomerSuggest, setShowCustomerSuggest] = useState(false)
+  const [calendarSuggestions, setCalendarSuggestions] = useState<CustomerSuggestion[]>([])
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [viewMode, setViewMode] = useState<'card' | 'table'>('card')
@@ -408,6 +411,34 @@ export default function Home() {
 
     return filtered
   }, [requests, user, searchTerm, statusFilter, quickFilter])
+
+  // แนะนำลูกค้าเก่าตอนพิมพ์ชื่อ/เบอร์ในฟอร์มเพิ่มงาน (ไม่แสดงตอนแก้ไขงานเดิม)
+  const customerSuggestions = useMemo(
+    () => (editingRequest
+      ? []
+      : mergeSuggestions(searchCustomers(requests, formData.customerName || ''), calendarSuggestions)),
+    [requests, formData.customerName, editingRequest, calendarSuggestions]
+  )
+
+  // ค้นประวัติจากปฏิทิน (ผ่าน Apps Script) หลังหยุดพิมพ์ 300ms
+  useEffect(() => {
+    const q = (formData.customerName || '').trim()
+    if (editingRequest || q.length < 2) {
+      setCalendarSuggestions([])
+      return
+    }
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      fetch(`/api/customers/calendar?q=${encodeURIComponent(q)}`, { signal: controller.signal })
+        .then((r) => r.json())
+        .then((d) => setCalendarSuggestions(Array.isArray(d.results) ? d.results : []))
+        .catch(() => {})
+    }, 300)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [formData.customerName, editingRequest])
 
   // Stats for dashboard
   const stats = useMemo(() => {
@@ -1748,15 +1779,55 @@ export default function Home() {
 
               {/* Name & Phone */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2">
+                <div className="col-span-2 relative">
                   <label className="block text-sm font-medium text-slate-700 mb-1">ชื่อร้าน / สาขา *</label>
                   <input
                     type="text"
                     value={formData.customerName || ''}
-                    onChange={(e) => setFormData(prev => ({ ...prev, customerName: e.target.value }))}
+                    onChange={(e) => {
+                      setFormData(prev => ({ ...prev, customerName: e.target.value }))
+                      setShowCustomerSuggest(true)
+                    }}
+                    onFocus={() => setShowCustomerSuggest(true)}
+                    onBlur={() => setShowCustomerSuggest(false)}
                     className="w-full px-3 py-2 border rounded-xl text-sm"
-                    placeholder="เช่น KFC สาขาสีลม, ที.เอส มอเตอร์"
+                    placeholder="เช่น KFC สาขาสีลม, ที.เอส มอเตอร์ (พิมพ์ชื่อหรือเบอร์เพื่อค้นหาลูกค้าเก่า)"
+                    autoComplete="off"
                   />
+                  {showCustomerSuggest && customerSuggestions.length > 0 && (
+                    <ul className="absolute z-20 left-0 right-0 mt-1 bg-white border rounded-xl shadow-lg max-h-64 overflow-y-auto">
+                      {customerSuggestions.map((c) => (
+                        <li key={c.customerName}>
+                          <button
+                            type="button"
+                            // mouseDown (ไม่ใช่ click) เพื่อให้เลือกได้ก่อน input เสียโฟกัส
+                            onMouseDown={(e) => {
+                              e.preventDefault()
+                              setFormData(prev => ({
+                                ...prev,
+                                customerName: c.customerName,
+                                contactName: c.contactName,
+                                phone: c.phone,
+                                address: c.address,
+                                notes: prev.notes || c.emphasis || '',
+                              }))
+                              setShowCustomerSuggest(false)
+                            }}
+                            className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b last:border-b-0"
+                          >
+                            <div className="text-sm font-medium text-slate-800">{c.customerName}</div>
+                            <div className="text-xs text-slate-500">
+                              {[c.contactName, c.phone].filter(Boolean).join(' · ') || 'ไม่มีผู้ติดต่อ/เบอร์'} · เคยลง {c.jobCount} งาน
+                              {c.source === 'calendar' && ' · จากปฏิทิน'}
+                              {c.source === 'both' && ' · ระบบ+ปฏิทิน'}
+                            </div>
+                            {c.emphasis && <div className="text-xs text-amber-600 truncate">⚠ {c.emphasis.split('\n')[0]}</div>}
+                            {c.address && <div className="text-xs text-slate-400 truncate">{c.address}</div>}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">ผู้ติดต่อ</label>

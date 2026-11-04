@@ -23,6 +23,9 @@ const CONFIG = {
 
 // Serve HTML page
 function doGet(e) {
+  if (e && e.parameter && e.parameter.action === 'searchCustomers') {
+    return handleCustomerSearch_(e.parameter)
+  }
   return HtmlService.createTemplateFromFile('index')
     .evaluate()
     .setTitle('ระบบรับงานบริการแอร์')
@@ -860,4 +863,210 @@ function createCalendarEvent(requestId, technicianName, dateTimeISO, durationMin
     Logger.log('createCalendarEvent error: ' + e.message)
     return { success: false, error: e.message }
   }
+}
+
+// ==================== CUSTOMER SEARCH FROM CALENDAR ====================
+// อ่านนัดเก่าในปฏิทินที่เป็นเจ้าของ เพื่อให้ฟอร์มรับงานดึงชื่อ/ผู้ติดต่อ/เบอร์/ที่อยู่เดิมมาเติม
+// ตั้งค่าครั้งแรก: Project Settings > Script Properties เพิ่ม CUSTOMER_SEARCH_TOKEN (ข้อความสุ่มยาวๆ)
+// แล้วรัน installCustomerIndexTrigger() หนึ่งครั้งจาก Apps Script Editor
+
+const CUSTOMER_INDEX = {
+  CACHE_KEY: 'customer_index_v1',
+  CHUNK_SIZE: 90000,   // CacheService เก็บได้ค่าละไม่เกิน ~100KB
+  TTL_SECONDS: 21600,  // 6 ชม. (สูงสุดของ CacheService)
+  DAYS_BACK: 180,
+  DAYS_AHEAD: 60,
+  SKIP_CALENDARS: ['ใบเสนอราคา', 'วันหยุด', 'ทีมการตลาด', 'งานเลื่อน/งานยกเลิก']
+}
+
+const MONEY_LINE_RE = /(฿|บาท|ราคา|ยอด|ต้นทุน|กำไร|เก็บเงิน|วางบิล|ชำระ|มัดจำ|ส่วนลด|ภาษี|vat|\d{1,3}(,\d{3})+(\.\d+)?)/i
+// (?<!\d)/(?!\d) กันไม่ให้ไปหยิบตัวเลขกลางเลข QT หรือเลขยาวอื่นมาเป็นเบอร์
+const PHONE_RE = /(?<!\d)0\d{1,2}[-\s]?\d{3}[-\s]?\d{4}(?!\d)/
+const MAP_URL_RE = /https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|www\.google\.com\/maps)[^\s"'<>]*/
+
+function htmlToText_(html) {
+  return String(html || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|li|ul|div)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+}
+
+// ชื่อลูกค้า = ชื่อนัด ตัดคำนำหน้า/ป้ายสถานะที่ทีมใส่ เช่น "ขอคิว - ", "(งานต่อ)"
+function cleanCustomerName_(title) {
+  return String(title || '')
+    .replace(/^[์\s]+/, '')
+    .replace(/^ขอคิว\s*-\s*/, '')
+    .replace(/\((?:งานต่อ|งานแก้|งานตกค้าง)\)/g, '')
+    .replace(/\s*เบอร์โทร\s*[:：]?\s*0\d[\d\s-]{7,}/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function parseCalendarEvent_(title, descriptionHtml, location, startTimeMs) {
+  const text = htmlToText_(descriptionHtml)
+  const lines = text.split('\n').map(function (l) { return l.trim() })
+
+  let contactName = ''
+  let phone = ''
+  const contactRe = /ติดต่อ\s*((?:คุณ|พี่|น้อง|ช่าง)?\s*[^\d\n(]+?)\s*((?<!\d)0\d{1,2}[-\s]?\d{3}[-\s]?\d{4}(?!\d))/
+  for (let i = 0; i < lines.length && !phone; i++) {
+    const m = lines[i].match(contactRe)
+    if (m) { contactName = m[1].trim(); phone = m[2].replace(/\s+/g, '') }
+  }
+  // "ติดต่อสาขา: 02-..." ไม่ใช่ชื่อคน ทิ้งไป
+  contactName = contactName.replace(/[:：\s]+$/, '')
+  if (/^(สาขา|ร้าน|เบอร์|โทร|ที่ร้าน)$/.test(contactName)) contactName = ''
+
+  if (!phone) {
+    const p = text.match(PHONE_RE)
+    if (p) phone = p[0].replace(/\s+/g, '')
+  }
+  if (!phone) {
+    const tp = String(title || '').match(PHONE_RE)  // บางนัดใส่เบอร์ไว้ในชื่อนัด
+    if (tp) phone = tp[0].replace(/\s+/g, '')
+  }
+
+  let address = String(location || '').trim()
+  if (!address) {
+    const map = String(descriptionHtml || '').match(MAP_URL_RE)
+    if (map) address = map[0]
+  }
+
+  // ข้อกำชับ = บรรทัดหลังคำว่า "สำคัญ" จนถึงเลข QT หรือลิงก์ข้อปฏิบัติ (ตัดบรรทัดเรื่องเงิน)
+  let emphasis = ''
+  const idx = lines.findIndex(function (l) { return l.indexOf('สำคัญ') !== -1 })
+  if (idx !== -1) {
+    const kept = []
+    for (let i = idx + 1; i < lines.length; i++) {
+      const l = lines[i]
+      if (/^QT/i.test(l) || l.indexOf('อ่านข้อปฏิบัติ') !== -1) break
+      if (l && !MONEY_LINE_RE.test(l)) kept.push(l)
+    }
+    emphasis = kept.join('\n').slice(0, 600)
+  }
+
+  return {
+    name: cleanCustomerName_(title),
+    contactName: contactName,
+    phone: phone,
+    address: address,
+    emphasis: emphasis,
+    time: startTimeMs || 0
+  }
+}
+
+function normalizeCustomerKey_(name) {
+  return String(name || '').toLowerCase().replace(/\s+/g, '')
+}
+
+// รวมนัดของลูกค้าเดียวกัน: นัดล่าสุดชนะ ช่องที่ว่างเติมจากนัดเก่า
+function mergeCustomer_(map, rec) {
+  const key = normalizeCustomerKey_(rec.name)
+  if (!key) return
+  const cur = map[key]
+  if (!cur) {
+    map[key] = { name: rec.name, contactName: rec.contactName, phone: rec.phone, address: rec.address, emphasis: rec.emphasis, time: rec.time, count: 1 }
+    return
+  }
+  cur.count += 1
+  const newer = rec.time >= cur.time
+  // ผู้ติดต่อกับเบอร์ไปด้วยกันเสมอ ไม่เอาชื่อจากนัดหนึ่งไปคู่กับเบอร์ของอีกนัด
+  if (rec.phone && (newer || !cur.phone)) {
+    cur.phone = rec.phone
+    cur.contactName = rec.contactName
+  }
+  ;['address', 'emphasis'].forEach(function (f) {
+    if (rec[f] && (newer || !cur[f])) cur[f] = rec[f]
+  })
+  if (newer) { cur.name = rec.name; cur.time = rec.time }
+}
+
+function searchCustomerList_(list, query, limit) {
+  const q = normalizeCustomerKey_(query)
+  const qDigits = String(query || '').replace(/\D/g, '')
+  if (q.length < 2) return []
+  return list
+    .filter(function (c) {
+      return normalizeCustomerKey_(c.name).indexOf(q) !== -1 ||
+        (qDigits.length >= 3 && String(c.phone || '').replace(/\D/g, '').indexOf(qDigits) !== -1)
+    })
+    .sort(function (a, b) {
+      const as = normalizeCustomerKey_(a.name).indexOf(q) === 0 ? 0 : 1
+      const bs = normalizeCustomerKey_(b.name).indexOf(q) === 0 ? 0 : 1
+      return (as - bs) || (b.count - a.count)
+    })
+    .slice(0, limit || 6)
+    .map(function (c) {
+      return { customerName: c.name, contactName: c.contactName, phone: c.phone, address: c.address, emphasis: c.emphasis, jobCount: c.count }
+    })
+}
+
+function writeCustomerIndexCache_(list) {
+  const cache = CacheService.getScriptCache()
+  const json = JSON.stringify(list)
+  const chunks = Math.ceil(json.length / CUSTOMER_INDEX.CHUNK_SIZE)
+  const entries = {}
+  entries[CUSTOMER_INDEX.CACHE_KEY + '_n'] = String(chunks)
+  for (let i = 0; i < chunks; i++) {
+    entries[CUSTOMER_INDEX.CACHE_KEY + '_' + i] = json.slice(i * CUSTOMER_INDEX.CHUNK_SIZE, (i + 1) * CUSTOMER_INDEX.CHUNK_SIZE)
+  }
+  cache.putAll(entries, CUSTOMER_INDEX.TTL_SECONDS)
+}
+
+function readCustomerIndexCache_() {
+  const cache = CacheService.getScriptCache()
+  const n = Number(cache.get(CUSTOMER_INDEX.CACHE_KEY + '_n'))
+  if (!n) return null
+  let json = ''
+  for (let i = 0; i < n; i++) {
+    const part = cache.get(CUSTOMER_INDEX.CACHE_KEY + '_' + i)
+    if (part === null) return null
+    json += part
+  }
+  try { return JSON.parse(json) } catch (e) { return null }
+}
+
+// สร้างดัชนีลูกค้าจากนัดในปฏิทินทุกตัวที่เป็นเจ้าของ (รันจาก trigger รายชั่วโมง หรือรันเองได้)
+function buildCustomerIndex() {
+  const now = Date.now()
+  const from = new Date(now - CUSTOMER_INDEX.DAYS_BACK * 86400000)
+  const to = new Date(now + CUSTOMER_INDEX.DAYS_AHEAD * 86400000)
+  const map = {}
+  CalendarApp.getAllOwnedCalendars().forEach(function (cal) {
+    const calName = cal.getName()
+    const skip = CUSTOMER_INDEX.SKIP_CALENDARS.some(function (s) { return calName.indexOf(s) !== -1 })
+    if (skip) return
+    cal.getEvents(from, to).forEach(function (ev) {
+      const rec = parseCalendarEvent_(ev.getTitle(), ev.getDescription(), ev.getLocation(), ev.getStartTime().getTime())
+      mergeCustomer_(map, rec)
+    })
+  })
+  const list = Object.keys(map).map(function (k) { return map[k] })
+  writeCustomerIndexCache_(list)
+  Logger.log('customer index built: ' + list.length + ' customers')
+  return list.length
+}
+
+// รันครั้งเดียวจาก Editor: สร้างดัชนีทันที และตั้งให้สร้างใหม่ทุกชั่วโมง
+function installCustomerIndexTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'buildCustomerIndex') ScriptApp.deleteTrigger(t)
+  })
+  ScriptApp.newTrigger('buildCustomerIndex').timeBased().everyHours(1).create()
+  return buildCustomerIndex()
+}
+
+// GET ?action=searchCustomers&q=...&token=... → JSON (เรียกจากเซิร์ฟเวอร์ Next.js เท่านั้น)
+function handleCustomerSearch_(params) {
+  const respond = function (obj) {
+    return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON)
+  }
+  const expected = PropertiesService.getScriptProperties().getProperty('CUSTOMER_SEARCH_TOKEN')
+  if (!expected || params.token !== expected) return respond({ success: false, error: 'Unauthorized' })
+
+  const list = readCustomerIndexCache_()
+  if (!list) return respond({ success: true, indexReady: false, results: [] })
+  return respond({ success: true, indexReady: true, results: searchCustomerList_(list, params.q, 6) })
 }

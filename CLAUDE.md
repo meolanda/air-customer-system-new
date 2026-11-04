@@ -37,6 +37,7 @@ src/
 │       ├── import                ← Sheets → Firebase (เมื่อฐานข้อมูลว่าง)
 │       ├── upload                ← อัปโหลดรูป/ไฟล์ไป Google Drive
 │       ├── calendar              ← สร้าง/แก้นัดหมาย Google Calendar
+│       ├── customers/calendar    ← ค้นลูกค้าเก่าจากนัดในปฏิทิน (ผ่าน Apps Script)
 │       ├── telegram              ← ส่งแจ้งเตือน
 │       └── ai/{analyze,analyze-image,analyze-pdf}  ← Gemini
 └── lib/
@@ -85,6 +86,8 @@ src/
 | `GOOGLE_CALENDAR_ID` | ปฏิทินนัดหมาย |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | แจ้งเตือน |
 | `GEMINI_API_KEY` | AI |
+| `GAS_CUSTOMER_URL` | URL Web app ของ Apps Script (ลงท้าย `/exec`) ใช้ค้นลูกค้าเก่าจากปฏิทิน (เรียกจากเซิร์ฟเวอร์เท่านั้น) |
+| `GAS_CUSTOMER_TOKEN` | ต้องตรงกับ Script Property `CUSTOMER_SEARCH_TOKEN` ใน Apps Script |
 | `API_SECRET_KEY` | (ไม่บังคับ) ใช้กับการเรียกแบบ server-to-server |
 
 ข้อควรระวังเรื่อง env บน Vercel:
@@ -151,6 +154,19 @@ npx tsc --noEmit   # type-check
 npm run lint
 ```
 ในเครื่องต้องมี `.env.local` ตามตารางด้านบน — ถ้าไม่มี `FIREBASE_SERVICE_ACCOUNT_JSON` หน้าเว็บจะอ่านงานไม่ได้ (ฐานข้อมูลปิดสำหรับคนนอก) และอัปโหลดรูปไม่ได้ถ้าไม่มี `GOOGLE_DRIVE_FOLDER_ID`
+
+---
+
+## 🔎 ค้นลูกค้าเก่าในฟอร์มรับงาน
+
+พิมพ์ชื่อร้านหรือเบอร์ในช่อง "ชื่อร้าน / สาขา" → มีรายการแนะนำ → เลือกแล้วเติมชื่อ ผู้ติดต่อ เบอร์ ที่อยู่ (และหมายเหตุจากข้อกำชับในปฏิทิน ถ้าช่องหมายเหตุว่าง) เพื่อให้ชื่อตรงกับที่เคยลงไว้
+
+- แหล่งที่ 1: งานที่มีอยู่แล้วในระบบ (`src/lib/customer-search.ts`, ค้นในเบราว์เซอร์)
+- แหล่งที่ 2: นัดเก่าในปฏิทิน ผ่าน Apps Script — `GET /api/customers/calendar?q=` (ต้องล็อกอิน) เรียก GAS `action=searchCustomers` ด้วย `GAS_CUSTOMER_TOKEN`
+- ถ้าไม่ได้ตั้ง `GAS_CUSTOMER_URL`/`GAS_CUSTOMER_TOKEN` จะค้นได้เฉพาะแหล่งที่ 1 (ไม่ error)
+- ฝั่ง Apps Script (`Code.gs`): `buildCustomerIndex()` อ่านปฏิทินที่เป็นเจ้าของย้อนหลัง 180 วัน เก็บดัชนีในแคช; ตั้ง Script Property `CUSTOMER_SEARCH_TOKEN` แล้วรัน `installCustomerIndexTrigger()` หนึ่งครั้งใน Editor (สร้างดัชนีทันที + อัปเดตทุกชั่วโมง)
+- Web app ของ GAS ต้อง deploy แบบ Execute as: Me / Access: Anyone (ตัว token เป็นตัวกันคนนอก) และหลังแก้ `Code.gs` ต้อง deploy เวอร์ชันใหม่
+- **ข้อยกเว้นของ "legacy":** ส่วนค้นลูกค้านี้เป็นโค้ด Apps Script ที่ production พึ่งอยู่จริง
 
 ---
 
