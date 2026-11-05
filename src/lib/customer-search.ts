@@ -36,17 +36,28 @@ export function mergeSuggestions(fromJobs: CustomerSuggestion[], fromCalendar: C
 
     const merged = new Map<string, CustomerSuggestion>()
     const aliasToKey = new Map<string, string>()
+    const looseToKeys = new Map<string, Set<string>>()  // คีย์แบบหลวม → ร้านในทะเบียน (ต้องตรงร้านเดียวถึงจะรวม)
     for (const raw of fromCalendar) {
         const c = clean(raw)
         const key = normalizeName(c.customerName)
         merged.set(key, { ...c, source: c.customerCode ? 'registry' : 'calendar' })
         for (const alias of c.aliases ?? []) aliasToKey.set(normalizeName(alias), key)
+        if (c.customerCode) {
+            for (const name of [c.customerName, ...(c.aliases ?? [])]) {
+                const loose = looseKey(name)
+                if (loose.length >= LOOSE_KEY_MIN_LENGTH) looseToKeys.set(loose, (looseToKeys.get(loose) ?? new Set()).add(key))
+            }
+        }
+    }
+    const looseMatch = (name: string): string | undefined => {
+        const keys = looseToKeys.get(looseKey(name))
+        return keys && keys.size === 1 && looseKey(name).length >= LOOSE_KEY_MIN_LENGTH ? [...keys][0] : undefined
     }
 
     for (const raw of fromJobs) {
         const j = clean(raw)
         const jobKey = normalizeName(j.customerName)
-        const key = merged.has(jobKey) ? jobKey : aliasToKey.get(jobKey)
+        const key = merged.has(jobKey) ? jobKey : aliasToKey.get(jobKey) ?? looseMatch(j.customerName)
         const cur = key ? merged.get(key) : undefined
         if (!key || !cur) {
             merged.set(jobKey, { ...j, source: 'jobs' })
@@ -88,6 +99,22 @@ export const cleanValue = (s?: string): string => {
 }
 
 const normalizeName = (s: string) => s.toLowerCase().replace(/\s+/g, '')
+
+// คีย์แบบหลวม: จับคู่ชื่อที่ต่างแค่เว้นวรรค / คำว่าสาขา / คำต่อท้ายงาน (กติกาเดียวกับตาราง "รวมชื่อลูกค้า" ของทีม)
+// ต้องตรงกับ looseCustomerKey_ ใน Code.gs (scripts/check-calendar-pattern.ts เช็กให้)
+export const LOOSE_KEY_MIN_LENGTH = 6
+export function looseKey(name: string): string {
+    return name
+        .toLowerCase()
+        .replace(/^\s*เสนอราคา\s*/, '')
+        .replace(/[[\]]/g, ' ')
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/\s*[-–—]\s*(wo[\w\-/]*.*|ซ่อม.*|ล้าง.*)$/i, ' ')
+        .replace(/เข้าได้เวลา.*$/, ' ')
+        .replace(/สาขา/g, ' ')
+        .replace(/['’`]/g, '')
+        .replace(/\s+/g, '')
+}
 const digitsOnly = (s: string) => s.replace(/\D/g, '')
 const timeOf = (s: string) => {
     const t = Date.parse(s)

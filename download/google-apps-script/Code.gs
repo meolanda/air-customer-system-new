@@ -1027,6 +1027,33 @@ function splitPhoneFromName_(name) {
   return { name: String(name || '').replace(PHONE_IN_NAME_RE, '').replace(/\s+/g, ' ').trim(), phone: m ? m[0].replace(/\s+/g, '') : '' }
 }
 
+// ช่องเบอร์โทรในทะเบียนบางแถวมีชื่อคนติดอยู่ ("065-983-xxxx คุณอังคณา" / "คุณปอนด์ 082-790-xxxx")
+// แยกเป็นเบอร์ (เบอร์แรก) + ชื่อผู้ติดต่อ ถ้าเหลือข้อความที่มีตัวเลข (เช่นเบอร์ที่สอง) ถือว่าไม่ใช่ชื่อคน
+function splitPhoneCell_(text) {
+  const raw = String(text || '')
+  const m = raw.match(PHONE_RE)
+  if (!m) return { phone: '', contact: '' }
+  const rest = raw.replace(new RegExp(PHONE_RE.source, 'g'), ' ').replace(/^\s*(ติดต่อ|โทร|เบอร์)\s*[:：]?/, '').replace(/[:：,\/]/g, ' ').replace(/\s+/g, ' ').trim()
+  return { phone: m[0].replace(/\s+/g, ''), contact: /\d/.test(rest) || rest.length > 60 ? '' : rest }
+}
+
+// คีย์แบบหลวม: ใช้จับคู่ชื่อในปฏิทินกับชื่อหลักในทะเบียน ตามกติกาเดียวกับตาราง "รวมชื่อลูกค้า" ของทีม
+// "ชื่อเหมือนกัน ต่างแค่เว้นวรรค / คำว่าสาขา / คำต่อท้ายงาน" — ต้องตรงกับ looseKey ใน src/lib/customer-search.ts
+function looseCustomerKey_(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/^\s*เสนอราคา\s*/, '')
+    .replace(/[\[\]]/g, ' ')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\s*[-–—]\s*(wo[\w\-\/]*.*|ซ่อม.*|ล้าง.*)$/i, ' ')
+    .replace(/เข้าได้เวลา.*$/, ' ')
+    .replace(/สาขา/g, ' ')
+    .replace(/['’`]/g, '')
+    .replace(/\s+/g, '')
+}
+
+const LOOSE_KEY_MIN_LENGTH = 6  // สั้นกว่านี้ (เช่น "kfc") กว้างเกินไป ไม่ใช้จับคู่
+
 function formatAcLine_(brand, btu, place, count) {
   const size = btu ? (/btu/i.test(btu) ? btu : btu + ' BTU') : ''
   const head = [brand, size].filter(Boolean).join(' ')
@@ -1052,19 +1079,24 @@ function buildRegistry_(registryRows, aliasRows, serviceRows) {
     const base = splitPhoneFromName_(cell_(r, 'ชื่อลูกค้า'))
     const display = [base.name, cell_(r, 'สาขา')].filter(Boolean).join(' ') || splitPhoneFromName_(cell_(r, 'ชื่อลูกค้า+สาขา')).name || cell_(r, 'รายชื่อ')
     if (!display) return
-    const phone = cell_(r, 'เบอร์โทรศัพท์') || base.phone
+    const cellPhone = splitPhoneCell_(cell_(r, 'เบอร์โทรศัพท์'))
+    const phone = cellPhone.phone || base.phone
+    const contact = cellPhone.phone ? cellPhone.contact : ''
     const rec = byCode[code]
     if (rec) {  // รหัสซ้ำ: เติมช่องที่ยังว่าง
-      if (!rec.phone) rec.phone = phone
+      if (!rec.phone) { rec.phone = phone; rec.contactName = contact }
       if (!rec.address) rec.address = cell_(r, 'ที่อยู่').slice(0, REGISTRY_LIMITS.ADDRESS)
     } else {
       byCode[code] = {
-        code: code, name: display, contactName: '', phone: phone,
+        code: code, name: display, contactName: contact, phone: phone,
         address: cell_(r, 'ที่อยู่').slice(0, REGISTRY_LIMITS.ADDRESS), emphasis: '', acInfo: '',
         aliases: [], count: Number(cell_(r, 'จำนวนการใช้บริการ')) || 0, time: 0, source: 'registry'
       }
     }
-    ;[display, cell_(r, 'รายชื่อ'), cell_(r, 'ชื่อลูกค้า'), base.name].forEach(function (n) { addName(n, code) })
+    // ชื่อลูกค้าเปล่าๆ (เช่นแบรนด์ "KFC") ใช้เป็นชื่ออื่นได้เฉพาะแถวที่ไม่มีสาขา ไม่งั้นแบรนด์จะไปชี้ที่สาขาแรกที่เจอ
+    const names = [display, cell_(r, 'รายชื่อ')]
+    if (!cell_(r, 'สาขา')) names.push(cell_(r, 'ชื่อลูกค้า'), base.name)
+    names.forEach(function (n) { addName(n, code) })
     const reg = byCode[code]
     if (cell_(r, 'รายชื่อ') && cell_(r, 'รายชื่อ') !== reg.name && reg.aliases.indexOf(cell_(r, 'รายชื่อ')) === -1) reg.aliases.push(cell_(r, 'รายชื่อ'))
   })
@@ -1103,7 +1135,24 @@ function buildRegistry_(registryRows, aliasRows, serviceRows) {
   Object.keys(byCode).forEach(function (code) {
     byCode[code].aliases = byCode[code].aliases.slice(0, REGISTRY_LIMITS.ALIASES).map(function (a) { return a.slice(0, REGISTRY_LIMITS.ALIAS_LENGTH) })
   })
-  return { byCode: byCode, nameToCode: nameToCode }
+  // คีย์แบบหลวม → รหัสลูกค้า เฉพาะที่ตรงร้านเดียว (ถ้ากำกวมหลายร้านไม่รวม กันรวมผิดสาขา)
+  const looseCodes = {}
+  const addLoose = function (name, code) {
+    const key = looseCustomerKey_(name)
+    if (key.length < LOOSE_KEY_MIN_LENGTH) return
+    const set = looseCodes[key] || (looseCodes[key] = {})
+    set[code] = true
+  }
+  Object.keys(byCode).forEach(function (code) {
+    addLoose(byCode[code].name, code)
+    byCode[code].aliases.forEach(function (a) { addLoose(a, code) })
+  })
+  const looseToCode = {}
+  Object.keys(looseCodes).forEach(function (key) {
+    const codes = Object.keys(looseCodes[key])
+    if (codes.length === 1) looseToCode[key] = codes[0]
+  })
+  return { byCode: byCode, nameToCode: nameToCode, looseToCode: looseToCode }
 }
 
 function loadHandymanRegistry_(sheetId) {
@@ -1126,7 +1175,9 @@ function mergeRegistryAndCalendar_(registry, calendarMap) {
   if (!registry) return calendarList
   const out = []
   calendarList.forEach(function (cal) {
-    const code = registry.nameToCode[normalizeCustomerKey_(cal.name)]
+    const loose = looseCustomerKey_(cal.name)
+    const code = registry.nameToCode[normalizeCustomerKey_(cal.name)] ||
+      (loose.length >= LOOSE_KEY_MIN_LENGTH ? registry.looseToCode[loose] : undefined)
     const reg = code && registry.byCode[code]
     if (!reg) { cal.source = 'calendar'; out.push(cal); return }
     if (cal.emphasis && cal.time >= reg.time) { reg.emphasis = cal.emphasis; reg.time = cal.time }
