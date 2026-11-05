@@ -1042,10 +1042,10 @@ function splitPhoneCell_(text) {
 function looseCustomerKey_(name) {
   return String(name || '')
     .toLowerCase()
-    .replace(/^\s*เสนอราคา\s*/, '')
+    .replace(/^\s*เสนอราคา\s*[-–—:]?\s*/, '')
     .replace(/[\[\]]/g, ' ')
     .replace(/\([^)]*\)/g, ' ')
-    .replace(/\s*[-–—]\s*(wo[\w\-\/]*.*|ซ่อม.*|ล้าง.*)$/i, ' ')
+    .replace(/\s*[-–—]\s*(wo[\w\-\/]*.*|ซ่อม.*|ล้าง.*|ตรวจ.*|ติดตั้ง.*)$/i, ' ')
     .replace(/เข้าได้เวลา.*$/, ' ')
     .replace(/สาขา/g, ' ')
     .replace(/['’`]/g, '')

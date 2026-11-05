@@ -26,6 +26,10 @@ const samples = [
     'KFC เซ็นทรัลวิลเลจ (ซ่อม)',
     'ร้านทดสอบ สาขา A',
     'KFC',
+    'เสนอราคา - [STN] ถนนพรานนก-พุทธมณฑล (ขาเข้า)',
+    "เสนอราคา - Santa Fe'Steak สาขา ซีคอน บางแค",
+    'QSA KFC Seacon Bangkae (ซีคอนบางแค) - ตรวจสอบ',
+    'QSA KFC Seacon Bangkae (ซีคอนบางแค) - ติดตั้ง',
 ]
 for (const s of samples) {
     if (looseKey(s) !== gsLooseKey(s)) failures.push(`looseKey ไม่ตรงกับ looseCustomerKey_ ที่ชื่อ "${s}"`)
