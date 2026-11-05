@@ -1043,6 +1043,7 @@ function looseCustomerKey_(name) {
   return String(name || '')
     .toLowerCase()
     .replace(/^\s*เสนอราคา\s*[-–—:]?\s*/, '')
+    .replace(/^\s*pm\s+/, '')
     .replace(/[\[\]]/g, ' ')
     .replace(/\([^)]*\)/g, ' ')
     .replace(/\s*[-–—]\s*(wo[\w\-\/]*.*|ซ่อม.*|ล้าง.*|ตรวจ.*|ติดตั้ง.*)$/i, ' ')
@@ -1170,22 +1171,56 @@ function loadHandymanRegistry_(sheetId) {
 
 // รวมทะเบียน (ชื่อหลัก) เข้ากับข้อมูลจากปฏิทิน: ชื่อในปฏิทินที่ตรงกับทะเบียน/ชื่อที่เคยรวมไว้ → เติมข้อเน้นย้ำให้ลูกค้ารายนั้น
 // ชื่อในปฏิทินที่ไม่ตรงกับทะเบียนเลยยังคงเป็นรายการแยก (source = calendar)
+// ชื่อที่มีแต่ในปฏิทิน (ไม่อยู่ในทะเบียน) ที่คีย์แบบหลวมเหมือนกัน รวมเป็นรายการเดียว
+// ชื่อที่มีนัดมากที่สุดเป็นชื่อหลัก (เท่ากันเลือกชื่อสั้นกว่า) ชื่ออื่นเก็บเป็น aliases
+function groupUnlinkedCalendar_(entries) {
+  const byKey = {}
+  const order = []
+  const out = []
+  entries.forEach(function (c) {
+    const key = looseCustomerKey_(c.name)
+    if (key.length < LOOSE_KEY_MIN_LENGTH) { out.push(c); return }
+    if (!byKey[key]) { byKey[key] = []; order.push(key) }
+    byKey[key].push(c)
+  })
+  order.forEach(function (key) {
+    const group = byKey[key].sort(function (a, b) { return (b.count - a.count) || (a.name.length - b.name.length) })
+    const main = group[0]
+    main.aliases = main.aliases || []
+    group.slice(1).forEach(function (o) {
+      main.count += o.count
+      if (!main.phone && o.phone) { main.phone = o.phone; main.contactName = o.contactName }
+      if (!main.address && o.address) main.address = o.address
+      if (o.emphasis && (!main.emphasis || o.time > main.time)) main.emphasis = o.emphasis
+      if (o.time > main.time) main.time = o.time
+      if (main.aliases.length < REGISTRY_LIMITS.ALIASES && main.aliases.indexOf(o.name) === -1) main.aliases.push(o.name.slice(0, REGISTRY_LIMITS.ALIAS_LENGTH))
+    })
+    out.push(main)
+  })
+  return out
+}
+
 function mergeRegistryAndCalendar_(registry, calendarMap) {
   const calendarList = Object.keys(calendarMap).map(function (k) { return calendarMap[k] })
-  if (!registry) return calendarList
+  if (!registry) {
+    calendarList.forEach(function (c) { c.source = 'calendar' })
+    return groupUnlinkedCalendar_(calendarList)
+  }
   const out = []
+  const unlinked = []
   calendarList.forEach(function (cal) {
     const loose = looseCustomerKey_(cal.name)
     const code = registry.nameToCode[normalizeCustomerKey_(cal.name)] ||
       (loose.length >= LOOSE_KEY_MIN_LENGTH ? registry.looseToCode[loose] : undefined)
     const reg = code && registry.byCode[code]
-    if (!reg) { cal.source = 'calendar'; out.push(cal); return }
+    if (!reg) { cal.source = 'calendar'; unlinked.push(cal); return }
     if (cal.emphasis && cal.time >= reg.time) { reg.emphasis = cal.emphasis; reg.time = cal.time }
     if (!reg.phone && cal.phone) { reg.phone = cal.phone; reg.contactName = cal.contactName }
     if (!reg.address && cal.address) reg.address = cal.address.slice(0, REGISTRY_LIMITS.ADDRESS)
     if (cal.name !== reg.name && reg.aliases.length < REGISTRY_LIMITS.ALIASES && reg.aliases.indexOf(cal.name) === -1) reg.aliases.push(cal.name.slice(0, REGISTRY_LIMITS.ALIAS_LENGTH))
     reg.source = 'both'
   })
+  groupUnlinkedCalendar_(unlinked).forEach(function (c) { out.push(c) })
   Object.keys(registry.byCode).forEach(function (code) { out.push(registry.byCode[code]) })
   return out
 }

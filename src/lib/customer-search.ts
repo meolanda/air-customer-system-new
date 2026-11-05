@@ -107,6 +107,7 @@ export function looseKey(name: string): string {
     return name
         .toLowerCase()
         .replace(/^\s*เสนอราคา\s*[-–—:]?\s*/, '')
+        .replace(/^\s*pm\s+/, '')
         .replace(/[[\]]/g, ' ')
         .replace(/\([^)]*\)/g, ' ')
         .replace(/\s*[-–—]\s*(wo[\w\-/]*.*|ซ่อม.*|ล้าง.*|ตรวจ.*|ติดตั้ง.*)$/i, ' ')
