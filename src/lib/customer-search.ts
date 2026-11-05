@@ -16,38 +16,68 @@ export interface CustomerSuggestion {
     address: string
     jobCount: number
     emphasis?: string   // ข้อกำชับเฉพาะงาน (มาจากปฏิทินเท่านั้น)
-    source?: 'jobs' | 'calendar' | 'both'
+    customerCode?: string  // รหัสลูกค้าในทะเบียน Handyman (C0001...) ถ้ามีแปลว่าเป็นชื่อหลัก
+    acInfo?: string        // ข้อมูลแอร์ในร้าน (ยี่ห้อ/BTU/ตำแหน่ง) จากประวัติบริการ
+    aliases?: string[]     // ชื่ออื่นของร้านเดียวกันที่ทะเบียนเคยรวมไว้ (ใช้รวมงานเก่าที่ชื่อสะกดต่าง)
+    source?: 'jobs' | 'calendar' | 'registry' | 'both'
 }
 
-// รวมผลจากงานในระบบกับผลจากปฏิทิน: ชื่อเดียวกันรวมเป็นแถวเดียว ใช้ข้อมูลในระบบก่อน ช่องที่ว่างเติมจากปฏิทิน
+// รวมผลจากปฏิทิน/ทะเบียนลูกค้า (Apps Script) กับงานในระบบ เป็นรายการเดียวต่อร้าน
+// - รายการที่มีรหัสลูกค้า (ทะเบียน Handyman) คือชื่อหลัก: ใช้ชื่อ/เบอร์/ที่อยู่ของทะเบียนก่อน ช่องที่ว่างเติมจากงานเก่า
+//   และงานเก่าที่ชื่อตรงกับชื่อหลักหรือชื่ออื่นที่เคยรวมไว้ (aliases) จะถูกรวมเข้าแถวเดียวกัน
+// - ร้านที่ไม่อยู่ในทะเบียน: ใช้ข้อมูลในระบบก่อน ช่องที่ว่างเติมจากปฏิทิน
 export function mergeSuggestions(fromJobs: CustomerSuggestion[], fromCalendar: CustomerSuggestion[], limit = 8): CustomerSuggestion[] {
-    const merged = new Map<string, CustomerSuggestion>()
     const clean = (s: CustomerSuggestion): CustomerSuggestion => ({
         ...s,
         contactName: cleanValue(s.contactName),
         phone: cleanValue(s.phone),
         address: cleanValue(s.address),
     })
-    for (const s of fromJobs) merged.set(normalizeName(s.customerName), { ...clean(s), source: 'jobs' })
+
+    const merged = new Map<string, CustomerSuggestion>()
+    const aliasToKey = new Map<string, string>()
     for (const raw of fromCalendar) {
         const c = clean(raw)
         const key = normalizeName(c.customerName)
-        const cur = merged.get(key)
-        if (!cur) {
-            merged.set(key, { ...c, source: 'calendar' })
+        merged.set(key, { ...c, source: c.customerCode ? 'registry' : 'calendar' })
+        for (const alias of c.aliases ?? []) aliasToKey.set(normalizeName(alias), key)
+    }
+
+    for (const raw of fromJobs) {
+        const j = clean(raw)
+        const jobKey = normalizeName(j.customerName)
+        const key = merged.has(jobKey) ? jobKey : aliasToKey.get(jobKey)
+        const cur = key ? merged.get(key) : undefined
+        if (!key || !cur) {
+            merged.set(jobKey, { ...j, source: 'jobs' })
             continue
         }
-        merged.set(key, {
-            ...cur,
-            // ผู้ติดต่อกับเบอร์ไปเป็นคู่เดียวกันจากแหล่งเดียว ไม่เอามาผสมข้ามแหล่ง
-            ...(cur.phone ? {} : { contactName: c.contactName, phone: c.phone }),
-            address: cur.address || c.address,
-            emphasis: c.emphasis || cur.emphasis,
-            jobCount: cur.jobCount + c.jobCount,
-            source: 'both',
-        })
+        if (cur.customerCode) {
+            merged.set(key, {
+                ...cur,
+                contactName: cur.phone ? cur.contactName : j.contactName,
+                phone: cur.phone || j.phone,
+                address: cur.address || j.address,
+                jobCount: cur.jobCount + j.jobCount,
+                source: 'both',
+            })
+        } else {
+            merged.set(key, {
+                ...j,
+                // ผู้ติดต่อกับเบอร์ไปเป็นคู่เดียวกันจากแหล่งเดียว ไม่เอามาผสมข้ามแหล่ง
+                ...(j.phone ? {} : { contactName: cur.contactName, phone: cur.phone }),
+                address: j.address || cur.address,
+                emphasis: cur.emphasis,
+                acInfo: cur.acInfo,
+                jobCount: j.jobCount + cur.jobCount,
+                source: 'both',
+            })
+        }
     }
-    return [...merged.values()].slice(0, limit)
+
+    // รายการที่มีรหัสลูกค้า (ชื่อหลักจากทะเบียน) ขึ้นก่อน
+    const rank = (s: CustomerSuggestion) => (s.customerCode ? 0 : 1)
+    return [...merged.values()].sort((a, b) => rank(a) - rank(b)).slice(0, limit)
 }
 
 // งานเก่าบางงานกรอก "*" "-" ฯลฯ เพื่อข้ามช่องบังคับ ถือว่าเป็นค่าว่าง
