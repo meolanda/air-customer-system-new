@@ -984,23 +984,184 @@ function mergeCustomer_(map, rec) {
   if (newer) { cur.name = rec.name; cur.time = rec.time }
 }
 
+// ---------- ทะเบียนลูกค้าจากชีท Handyman (อ่านอย่างเดียว ไม่แตะตัวเลขเงินเลย) ----------
+// ตั้ง Script Property HANDYMAN_SHEET_ID = รหัสชีท "สรุปยอดขาย Handyman2026" (ไม่ใส่ในโค้ดเพราะ repo เป็น public)
+// ใช้ 3 แท็บ: ข้อมูลลูกค้า (ชื่อหลัก/เบอร์/ที่อยู่/รหัส), 🔗 รวมชื่อลูกค้า (ชื่อที่เขียนหลายแบบ), ข้อมูลการบริการ (ยี่ห้อ/BTU/ตำแหน่งแอร์)
+
+const HANDYMAN_TABS = { REGISTRY: 'ข้อมูลลูกค้า', ALIASES: '🔗 รวมชื่อลูกค้า', SERVICES: 'ข้อมูลการบริการ' }
+const REGISTRY_LIMITS = { AC_LINES: 6, ALIASES: 8, ALIAS_LENGTH: 60, ADDRESS: 160, AC_TEXT: 400 }
+const PHONE_IN_NAME_RE = /\s*0\d{1,2}[-\s]?\d{3}[-\s]?\d{4}/
+
+function cleanCell_(v) {
+  const s = String(v === null || v === undefined ? '' : v).replace(/\s+/g, ' ').trim()
+  return /^[\s*\-–—_.'"?]*$/.test(s) ? '' : s  // "*" "-" ฯลฯ ที่ใส่ไว้ข้ามช่องบังคับ = ว่าง
+}
+
+// อ่านเฉพาะคอลัมน์ที่ขอ (ตามชื่อหัวตาราง) จึงไม่ดึงคอลัมน์เงินมาเลย และไม่พังถ้าลำดับคอลัมน์เปลี่ยน
+function readColumnsByHeader_(sheet, wanted) {
+  const lastRow = sheet.getLastRow()
+  const lastCol = sheet.getLastColumn()
+  if (lastRow < 2 || lastCol < 1) return []
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).replace(/\s+/g, ' ').trim() })
+  const cols = {}
+  wanted.forEach(function (name) {
+    const i = headers.indexOf(name)
+    if (i !== -1) cols[name] = i
+  })
+  const names = Object.keys(cols)
+  if (!names.length) return []
+  const data = {}
+  names.forEach(function (name) { data[name] = sheet.getRange(2, cols[name] + 1, lastRow - 1, 1).getValues() })
+  const rows = []
+  for (let r = 0; r < lastRow - 1; r++) {
+    const row = {}
+    names.forEach(function (name) { row[name] = cleanCell_(data[name][r][0]) })
+    rows.push(row)
+  }
+  return rows
+}
+
+// ชื่อลูกค้าในทะเบียนบางรายมีเบอร์ติดอยู่ ("คุณโอ 089-xxx-xxxx") แยกเบอร์ออกจากชื่อ
+function splitPhoneFromName_(name) {
+  const m = String(name || '').match(PHONE_IN_NAME_RE)
+  return { name: String(name || '').replace(PHONE_IN_NAME_RE, '').replace(/\s+/g, ' ').trim(), phone: m ? m[0].replace(/\s+/g, '') : '' }
+}
+
+function formatAcLine_(brand, btu, place, count) {
+  const size = btu ? (/btu/i.test(btu) ? btu : btu + ' BTU') : ''
+  const head = [brand, size].filter(Boolean).join(' ')
+  return '- ' + head + (place ? ' · ' + place : '') + (count > 1 ? ' (x' + count + ')' : '')
+}
+
+function cell_(row, name) {
+  return cleanCell_(row[name])
+}
+
+// registryRows/aliasRows/serviceRows = แถวที่อ่านด้วย readColumnsByHeader_ → { byCode, nameToCode }
+function buildRegistry_(registryRows, aliasRows, serviceRows) {
+  const byCode = {}
+  const nameToCode = {}
+  const addName = function (name, code) {
+    const key = normalizeCustomerKey_(name)
+    if (key && code && !nameToCode[key]) nameToCode[key] = code
+  }
+
+  registryRows.forEach(function (r) {
+    const code = cell_(r, 'รหัสลูกค้า')
+    if (!code) return
+    const base = splitPhoneFromName_(cell_(r, 'ชื่อลูกค้า'))
+    const display = [base.name, cell_(r, 'สาขา')].filter(Boolean).join(' ') || splitPhoneFromName_(cell_(r, 'ชื่อลูกค้า+สาขา')).name || cell_(r, 'รายชื่อ')
+    if (!display) return
+    const phone = cell_(r, 'เบอร์โทรศัพท์') || base.phone
+    const rec = byCode[code]
+    if (rec) {  // รหัสซ้ำ: เติมช่องที่ยังว่าง
+      if (!rec.phone) rec.phone = phone
+      if (!rec.address) rec.address = cell_(r, 'ที่อยู่').slice(0, REGISTRY_LIMITS.ADDRESS)
+    } else {
+      byCode[code] = {
+        code: code, name: display, contactName: '', phone: phone,
+        address: cell_(r, 'ที่อยู่').slice(0, REGISTRY_LIMITS.ADDRESS), emphasis: '', acInfo: '',
+        aliases: [], count: Number(cell_(r, 'จำนวนการใช้บริการ')) || 0, time: 0, source: 'registry'
+      }
+    }
+    ;[display, cell_(r, 'รายชื่อ'), cell_(r, 'ชื่อลูกค้า'), base.name].forEach(function (n) { addName(n, code) })
+    const reg = byCode[code]
+    if (cell_(r, 'รายชื่อ') && cell_(r, 'รายชื่อ') !== reg.name && reg.aliases.indexOf(cell_(r, 'รายชื่อ')) === -1) reg.aliases.push(cell_(r, 'รายชื่อ'))
+  })
+
+  aliasRows.forEach(function (r) {
+    const reg = byCode[cell_(r, 'รหัสลูกค้า')]
+    if (!reg) return
+    ;[cell_(r, 'ชื่อที่พบ'), cell_(r, 'ชื่อหลัก')].forEach(function (n) {
+      addName(n, reg.code)
+      const clean = splitPhoneFromName_(n).name
+      if (clean && clean !== reg.name && reg.aliases.indexOf(clean) === -1) reg.aliases.push(clean)
+    })
+  })
+
+  // ข้อมูลแอร์: รวมยี่ห้อ/BTU/ตำแหน่งที่เคยเข้าทำของลูกค้าแต่ละราย (จับคู่จากชื่อลูกค้าในแต่ละงาน)
+  const acByCode = {}
+  serviceRows.forEach(function (r) {
+    const code = nameToCode[normalizeCustomerKey_(cell_(r, 'ลูกค้า'))]
+    if (!code || !byCode[code]) return
+    const brand = cell_(r, 'ยี่ห้อ-รุ่น')
+    const btu = cell_(r, 'BTU')
+    if (!brand && !btu) return
+    const place = cell_(r, 'สถานที่ที่ติดตั้ง')
+    const key = [brand, btu, place].join('|')
+    const bucket = acByCode[code] || (acByCode[code] = {})
+    bucket[key] = bucket[key] || { brand: brand, btu: btu, place: place, count: 0 }
+    bucket[key].count += 1
+  })
+  Object.keys(acByCode).forEach(function (code) {
+    const items = Object.keys(acByCode[code]).map(function (k) { return acByCode[code][k] })
+      .sort(function (a, b) { return b.count - a.count })
+      .slice(0, REGISTRY_LIMITS.AC_LINES)
+    byCode[code].acInfo = items.map(function (i) { return formatAcLine_(i.brand, i.btu, i.place, i.count) }).join('\n').slice(0, REGISTRY_LIMITS.AC_TEXT)
+  })
+
+  Object.keys(byCode).forEach(function (code) {
+    byCode[code].aliases = byCode[code].aliases.slice(0, REGISTRY_LIMITS.ALIASES).map(function (a) { return a.slice(0, REGISTRY_LIMITS.ALIAS_LENGTH) })
+  })
+  return { byCode: byCode, nameToCode: nameToCode }
+}
+
+function loadHandymanRegistry_(sheetId) {
+  const ss = SpreadsheetApp.openById(sheetId)
+  const read = function (tab, wanted) {
+    const sheet = ss.getSheetByName(tab)
+    return sheet ? readColumnsByHeader_(sheet, wanted) : []
+  }
+  return buildRegistry_(
+    read(HANDYMAN_TABS.REGISTRY, ['รายชื่อ', 'ชื่อลูกค้า', 'สาขา', 'ชื่อลูกค้า+สาขา', 'เบอร์โทรศัพท์', 'ที่อยู่', 'จำนวนการใช้บริการ', 'รหัสลูกค้า']),
+    read(HANDYMAN_TABS.ALIASES, ['ชื่อที่พบ', 'รหัสลูกค้า', 'ชื่อหลัก']),
+    read(HANDYMAN_TABS.SERVICES, ['ลูกค้า', 'ยี่ห้อ-รุ่น', 'BTU', 'สถานที่ที่ติดตั้ง'])
+  )
+}
+
+// รวมทะเบียน (ชื่อหลัก) เข้ากับข้อมูลจากปฏิทิน: ชื่อในปฏิทินที่ตรงกับทะเบียน/ชื่อที่เคยรวมไว้ → เติมข้อเน้นย้ำให้ลูกค้ารายนั้น
+// ชื่อในปฏิทินที่ไม่ตรงกับทะเบียนเลยยังคงเป็นรายการแยก (source = calendar)
+function mergeRegistryAndCalendar_(registry, calendarMap) {
+  const calendarList = Object.keys(calendarMap).map(function (k) { return calendarMap[k] })
+  if (!registry) return calendarList
+  const out = []
+  calendarList.forEach(function (cal) {
+    const code = registry.nameToCode[normalizeCustomerKey_(cal.name)]
+    const reg = code && registry.byCode[code]
+    if (!reg) { cal.source = 'calendar'; out.push(cal); return }
+    if (cal.emphasis && cal.time >= reg.time) { reg.emphasis = cal.emphasis; reg.time = cal.time }
+    if (!reg.phone && cal.phone) { reg.phone = cal.phone; reg.contactName = cal.contactName }
+    if (!reg.address && cal.address) reg.address = cal.address.slice(0, REGISTRY_LIMITS.ADDRESS)
+    if (cal.name !== reg.name && reg.aliases.length < REGISTRY_LIMITS.ALIASES && reg.aliases.indexOf(cal.name) === -1) reg.aliases.push(cal.name.slice(0, REGISTRY_LIMITS.ALIAS_LENGTH))
+    reg.source = 'both'
+  })
+  Object.keys(registry.byCode).forEach(function (code) { out.push(registry.byCode[code]) })
+  return out
+}
+
+function customerMatches_(c, q, qDigits) {
+  if (normalizeCustomerKey_(c.name).indexOf(q) !== -1) return true
+  if ((c.aliases || []).some(function (a) { return normalizeCustomerKey_(a).indexOf(q) !== -1 })) return true
+  return qDigits.length >= 3 && String(c.phone || '').replace(/\D/g, '').indexOf(qDigits) !== -1
+}
+
 function searchCustomerList_(list, query, limit) {
   const q = normalizeCustomerKey_(query)
   const qDigits = String(query || '').replace(/\D/g, '')
   if (q.length < 2) return []
   return list
-    .filter(function (c) {
-      return normalizeCustomerKey_(c.name).indexOf(q) !== -1 ||
-        (qDigits.length >= 3 && String(c.phone || '').replace(/\D/g, '').indexOf(qDigits) !== -1)
-    })
+    .filter(function (c) { return customerMatches_(c, q, qDigits) })
     .sort(function (a, b) {
       const as = normalizeCustomerKey_(a.name).indexOf(q) === 0 ? 0 : 1
       const bs = normalizeCustomerKey_(b.name).indexOf(q) === 0 ? 0 : 1
-      return (as - bs) || (b.count - a.count)
+      return (as - bs) || ((b.count || 0) - (a.count || 0))
     })
     .slice(0, limit || 6)
     .map(function (c) {
-      return { customerName: c.name, contactName: c.contactName, phone: c.phone, address: c.address, emphasis: c.emphasis, jobCount: c.count }
+      return {
+        customerName: c.name, customerCode: c.code || '', contactName: c.contactName, phone: c.phone, address: c.address,
+        emphasis: c.emphasis, acInfo: c.acInfo || '', aliases: c.aliases || [], jobCount: c.count || 0, source: c.source || 'calendar'
+      }
     })
 }
 
@@ -1020,10 +1181,13 @@ function readCustomerIndexCache_() {
   const cache = CacheService.getScriptCache()
   const n = Number(cache.get(CUSTOMER_INDEX.CACHE_KEY + '_n'))
   if (!n) return null
+  const keys = []
+  for (let i = 0; i < n; i++) keys.push(CUSTOMER_INDEX.CACHE_KEY + '_' + i)
+  const parts = cache.getAll(keys)  // ดึงทุกชิ้นในครั้งเดียว (ดัชนีมีหลายชิ้นเมื่อรวมทะเบียนลูกค้า)
   let json = ''
   for (let i = 0; i < n; i++) {
-    const part = cache.get(CUSTOMER_INDEX.CACHE_KEY + '_' + i)
-    if (part === null) return null
+    const part = parts[keys[i]]
+    if (part === undefined || part === null) return null
     json += part
   }
   try { return JSON.parse(json) } catch (e) { return null }
@@ -1044,9 +1208,18 @@ function buildCustomerIndex() {
       mergeCustomer_(map, rec)
     })
   })
-  const list = Object.keys(map).map(function (k) { return map[k] })
+  let registry = null
+  const sheetId = PropertiesService.getScriptProperties().getProperty('HANDYMAN_SHEET_ID')
+  if (sheetId) {
+    try {
+      registry = loadHandymanRegistry_(sheetId)
+    } catch (e) {
+      Logger.log('Handyman registry not loaded (calendar only): ' + e.message)
+    }
+  }
+  const list = mergeRegistryAndCalendar_(registry, map)
   writeCustomerIndexCache_(list)
-  Logger.log('customer index built: ' + list.length + ' customers')
+  Logger.log('customer index built: ' + list.length + ' customers' + (registry ? ' (with Handyman registry)' : ' (calendar only)'))
   return list.length
 }
 

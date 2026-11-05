@@ -22,6 +22,8 @@ interface ServiceRequest {
   channel: 'LINE' | 'โทร' | 'Walk-in' | 'Facebook' | 'อื่นๆ'
   customerName: string   // ชื่อร้าน/สาขา
   contactName?: string   // ผู้ติดต่อ (optional)
+  customerCode?: string  // รหัสลูกค้าในทะเบียน Handyman (ถ้าเลือกจากรายการแนะนำ)
+  acInfo?: string        // ข้อมูลแอร์ในร้าน (ใส่ในนัดปฏิทิน)
   phone: string
   address: string
   serviceType: string
@@ -131,6 +133,8 @@ export default function Home() {
     channel: 'LINE',
     customerName: '',
     contactName: '',
+    customerCode: '',
+    acInfo: '',
     phone: '',
     address: '',
     serviceType: 'ล้างแอร์',
@@ -559,6 +563,9 @@ export default function Home() {
           createdAt: new Date().toISOString(),
           channel: formData.channel || 'LINE',
           customerName: formData.customerName || '',
+          contactName: formData.contactName || '',
+          customerCode: formData.customerCode || '',
+          acInfo: formData.acInfo || '',
           phone: formData.phone || '',
           address: formData.address || '',
           serviceType: formData.serviceType || 'ล้างแอร์',
@@ -613,6 +620,8 @@ export default function Home() {
         channel: 'LINE',
         customerName: '',
         contactName: '',
+        customerCode: '',
+        acInfo: '',
         phone: '',
         address: '',
         serviceType: 'ล้างแอร์',
@@ -1785,7 +1794,8 @@ export default function Home() {
                     type="text"
                     value={formData.customerName || ''}
                     onChange={(e) => {
-                      setFormData(prev => ({ ...prev, customerName: e.target.value }))
+                      // พิมพ์แก้ชื่อเอง = ไม่ใช่รายการที่เลือกไว้แล้ว ล้างรหัสลูกค้า/ข้อมูลแอร์ กันข้อมูลของร้านอื่นติดไป
+                      setFormData(prev => ({ ...prev, customerName: e.target.value, customerCode: '', acInfo: '' }))
                       setShowCustomerSuggest(true)
                     }}
                     onFocus={() => setShowCustomerSuggest(true)}
@@ -1810,6 +1820,8 @@ export default function Home() {
                                 phone: c.phone,
                                 address: c.address,
                                 notes: prev.notes || c.emphasis || '',
+                                customerCode: c.customerCode || '',
+                                acInfo: c.acInfo || '',
                               }))
                               setShowCustomerSuggest(false)
                             }}
@@ -1820,7 +1832,10 @@ export default function Home() {
                               {[c.contactName, c.phone].filter(Boolean).join(' · ') || 'ไม่มีผู้ติดต่อ/เบอร์'} · เคยลง {c.jobCount} งาน
                               {c.source === 'calendar' && ' · จากปฏิทิน'}
                               {c.source === 'both' && ' · ระบบ+ปฏิทิน'}
+                              {c.source === 'registry' && ' · ทะเบียนลูกค้า'}
+                              {c.customerCode && ` · ${c.customerCode}`}
                             </div>
+                            {c.acInfo && <div className="text-xs text-sky-700 truncate">❄ {(c.acInfo.split('\n')[0] ?? '').replace(/^- /, '')}{c.acInfo.includes('\n') ? ' …' : ''}</div>}
                             {c.emphasis && <div className="text-xs text-amber-600 truncate">⚠ {c.emphasis.split('\n')[0]}</div>}
                             {c.address && <div className="text-xs text-slate-400 truncate">{c.address}</div>}
                           </button>
