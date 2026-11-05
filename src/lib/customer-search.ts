@@ -49,9 +49,15 @@ export function mergeSuggestions(fromJobs: CustomerSuggestion[], fromCalendar: C
             }
         }
     }
+    // คัดร้านที่วงเล็บบอกสาขาขัดแย้งออกก่อน แล้วรวมเฉพาะเมื่อเหลือร้านเดียว
     const looseMatch = (name: string): string | undefined => {
-        const keys = looseToKeys.get(looseKey(name))
-        return keys && keys.size === 1 && looseKey(name).length >= LOOSE_KEY_MIN_LENGTH ? [...keys][0] : undefined
+        const loose = looseKey(name)
+        if (loose.length < LOOSE_KEY_MIN_LENGTH) return undefined
+        const compatible = [...(looseToKeys.get(loose) ?? [])].filter((k) => {
+            const shop = merged.get(k)
+            return shop ? [shop.customerName, ...(shop.aliases ?? [])].some((n) => !parenConflict(name, n)) : false
+        })
+        return compatible.length === 1 ? compatible[0] : undefined
     }
 
     for (const raw of fromJobs) {
@@ -103,6 +109,21 @@ const normalizeName = (s: string) => s.toLowerCase().replace(/\s+/g, '')
 // คีย์แบบหลวม: จับคู่ชื่อที่ต่างแค่เว้นวรรค / คำว่าสาขา / คำต่อท้ายงาน (กติกาเดียวกับตาราง "รวมชื่อลูกค้า" ของทีม)
 // ต้องตรงกับ looseCustomerKey_ ใน Code.gs (scripts/check-calendar-pattern.ts เช็กให้)
 export const LOOSE_KEY_MIN_LENGTH = 6
+
+// ข้อความในวงเล็บที่ "เป็นตัวตน" (ไม่นับหมายเหตุงานอย่าง (ซ่อม) (รออะไหล่) (PM)) เช่น (BBT บางบัวทอง) vs (MTU เมืองทอง)
+// สองชื่อที่มีตัวตนในวงเล็บทั้งคู่และไม่เหมือนกัน = คนละสาขา ห้ามรวม — ต้องตรงกับ parenIdentityKey_ ใน Code.gs
+const PAREN_NOTE_RE = /^(ซ่อม|ล้าง|ตรวจ|ติดตั้ง|รออะไหล่|อะไหล่|pm)/
+export function parenIdentityKey(name: string): string {
+    return (name.toLowerCase().match(/\([^)]*\)/g) ?? [])
+        .map((p) => p.slice(1, -1).replace(/['’`\s]/g, ''))
+        .filter((p) => p && !PAREN_NOTE_RE.test(p))
+        .join('')
+}
+export function parenConflict(a: string, b: string): boolean {
+    const ka = parenIdentityKey(a)
+    const kb = parenIdentityKey(b)
+    return ka !== '' && kb !== '' && ka !== kb
+}
 export function looseKey(name: string): string {
     return name
         .toLowerCase()
