@@ -30,6 +30,9 @@ const samples = [
     "เสนอราคา - Santa Fe'Steak สาขา ซีคอน บางแค",
     'QSA KFC Seacon Bangkae (ซีคอนบางแค) - ตรวจสอบ',
     'QSA KFC Seacon Bangkae (ซีคอนบางแค) - ติดตั้ง',
+    "PM Santa Fe'Steak สาขา ซีคอนสแควร์ ศรีนครินทร์",
+    'pm  KFC เซ็นทรัลวิลเลจ',
+    'PMK Cafe สาขาทดสอบ',
 ]
 for (const s of samples) {
     if (looseKey(s) !== gsLooseKey(s)) failures.push(`looseKey ไม่ตรงกับ looseCustomerKey_ ที่ชื่อ "${s}"`)
