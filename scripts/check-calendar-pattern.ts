@@ -5,7 +5,7 @@
 import { readFileSync } from 'fs'
 import { runInNewContext } from 'vm'
 import { EMPHASIS_MARKERS, MONEY_LINE_SOURCE } from '../src/lib/calendar-template'
-import { looseKey } from '../src/lib/customer-search'
+import { looseKey, parenIdentityKey } from '../src/lib/customer-search'
 
 const gs = readFileSync('download/google-apps-script/Code.gs', 'utf8')
 const failures: string[] = []
@@ -36,6 +36,23 @@ const samples = [
 ]
 for (const s of samples) {
     if (looseKey(s) !== gsLooseKey(s)) failures.push(`looseKey ไม่ตรงกับ looseCustomerKey_ ที่ชื่อ "${s}"`)
+}
+
+// กันรวมผิดสาขา: parenIdentityKey ฝั่งเว็บต้องให้ผลเหมือน parenIdentityKey_ ใน Code.gs
+const gsParenKey = runInNewContext(`${gs}\nparenIdentityKey_`, {}) as (name: string) => string
+const parenSamples = [
+    'บ. ริเวอร์พลัส (BBT บางบัวทอง)',
+    'บ. ริเวอร์พลัส (MTU เมืองทอง)',
+    'FITWHEY GYM (RAMA 2)',
+    'FITWHEY GYM (LADPRAO 101)',
+    "Jones' Salad (ครัวกลางไลน์ผลิต) ลาดพร้าว 18",
+    'QSA KFC Wood Smith Village (วู้ด สมิธ วิลเลจ) -ซ่อม',
+    'KFC เซ็นทรัลวิลเลจ (ซ่อม)',
+    'QSA KFC Bangkae (รออะไหล่) (ซีคอนบางแค)',
+    'ร้านทดสอบ',
+]
+for (const s of parenSamples) {
+    if (parenIdentityKey(s) !== gsParenKey(s)) failures.push(`parenIdentityKey ไม่ตรงกับ parenIdentityKey_ ที่ชื่อ "${s}"`)
 }
 
 if (failures.length) {

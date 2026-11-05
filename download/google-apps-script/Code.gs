@@ -1055,6 +1055,23 @@ function looseCustomerKey_(name) {
 
 const LOOSE_KEY_MIN_LENGTH = 6  // สั้นกว่านี้ (เช่น "kfc") กว้างเกินไป ไม่ใช้จับคู่
 
+// ข้อความในวงเล็บ: บางทีเป็นแค่หมายเหตุงาน/คำแปล (ตัดทิ้งได้) แต่บางทีคือตัวบอกสาขา เช่น "(BBT บางบัวทอง)" vs "(MTU เมืองทอง)"
+// parenIdentityKey_ = เนื้อหาในวงเล็บที่ "เป็นตัวตน" (ไม่นับหมายเหตุงานอย่าง (ซ่อม) (รออะไหล่) (PM))
+// ถ้าสองชื่อมีตัวตนในวงเล็บทั้งคู่และไม่เหมือนกัน = คนละสาขา ห้ามรวม — ต้องตรงกับ parenIdentityKey ใน src/lib/customer-search.ts
+const PAREN_NOTE_RE = /^(ซ่อม|ล้าง|ตรวจ|ติดตั้ง|รออะไหล่|อะไหล่|pm)/
+function parenIdentityKey_(name) {
+  const parts = String(name || '').toLowerCase().match(/\([^)]*\)/g) || []
+  return parts
+    .map(function (p) { return p.slice(1, -1).replace(/['’`\s]/g, '') })
+    .filter(function (p) { return p && !PAREN_NOTE_RE.test(p) })
+    .join('')
+}
+function parenConflict_(a, b) {
+  const ka = parenIdentityKey_(a)
+  const kb = parenIdentityKey_(b)
+  return ka !== '' && kb !== '' && ka !== kb
+}
+
 function formatAcLine_(brand, btu, place, count) {
   const size = btu ? (/btu/i.test(btu) ? btu : btu + ' BTU') : ''
   const head = [brand, size].filter(Boolean).join(' ')
@@ -1148,12 +1165,21 @@ function buildRegistry_(registryRows, aliasRows, serviceRows) {
     addLoose(byCode[code].name, code)
     byCode[code].aliases.forEach(function (a) { addLoose(a, code) })
   })
-  const looseToCode = {}
-  Object.keys(looseCodes).forEach(function (key) {
-    const codes = Object.keys(looseCodes[key])
-    if (codes.length === 1) looseToCode[key] = codes[0]
+  // เก็บรหัสทั้งหมดที่ตรงคีย์ ตอนจับคู่ค่อยคัดร้านที่วงเล็บขัดแย้งออก แล้วรวมเฉพาะเมื่อเหลือร้านเดียว
+  const looseToCodes = {}
+  Object.keys(looseCodes).forEach(function (key) { looseToCodes[key] = Object.keys(looseCodes[key]) })
+  return { byCode: byCode, nameToCode: nameToCode, looseToCodes: looseToCodes }
+}
+
+// หารหัสลูกค้าจากชื่อด้วยคีย์แบบหลวม: คัดร้านที่วงเล็บบอกสาขาขัดแย้งออก แล้วต้องเหลือร้านเดียวเท่านั้น
+function resolveRegistryByLooseKey_(registry, name) {
+  const loose = looseCustomerKey_(name)
+  if (loose.length < LOOSE_KEY_MIN_LENGTH) return undefined
+  const compatible = (registry.looseToCodes[loose] || []).filter(function (code) {
+    const reg = registry.byCode[code]
+    return [reg.name].concat(reg.aliases).some(function (n) { return !parenConflict_(name, n) })
   })
-  return { byCode: byCode, nameToCode: nameToCode, looseToCode: looseToCode }
+  return compatible.length === 1 ? compatible[0] : undefined
 }
 
 function loadHandymanRegistry_(sheetId) {
@@ -1173,18 +1199,30 @@ function loadHandymanRegistry_(sheetId) {
 // ชื่อในปฏิทินที่ไม่ตรงกับทะเบียนเลยยังคงเป็นรายการแยก (source = calendar)
 // ชื่อที่มีแต่ในปฏิทิน (ไม่อยู่ในทะเบียน) ที่คีย์แบบหลวมเหมือนกัน รวมเป็นรายการเดียว
 // ชื่อที่มีนัดมากที่สุดเป็นชื่อหลัก (เท่ากันเลือกชื่อสั้นกว่า) ชื่ออื่นเก็บเป็น aliases
+// กันรวมผิดสาขา: ชื่อที่วงเล็บบอกสาขาต่างกัน (เช่น (RAMA 2) vs (LADPRAO 101)) ไม่รวมกัน
+// และชื่อที่ไม่มีวงเล็บจะรวมเข้ากลุ่มได้เฉพาะเมื่อมีกลุ่มที่เข้ากันได้กลุ่มเดียว
 function groupUnlinkedCalendar_(entries) {
-  const byKey = {}
+  const groupsByKey = {}
   const order = []
   const out = []
   entries.forEach(function (c) {
     const key = looseCustomerKey_(c.name)
     if (key.length < LOOSE_KEY_MIN_LENGTH) { out.push(c); return }
-    if (!byKey[key]) { byKey[key] = []; order.push(key) }
-    byKey[key].push(c)
+    const identity = parenIdentityKey_(c.name)
+    const groups = groupsByKey[key] || (groupsByKey[key] = [])
+    const compatible = groups.filter(function (g) { return !g.identity || !identity || g.identity === identity })
+    const target = compatible.length === 1 || (compatible.length > 1 && identity) ? compatible[0] : undefined
+    if (target) {
+      target.members.push(c)
+      if (!target.identity) target.identity = identity
+    } else {
+      const group = { identity: identity, members: [c] }
+      groups.push(group)
+      order.push(group)
+    }
   })
-  order.forEach(function (key) {
-    const group = byKey[key].sort(function (a, b) { return (b.count - a.count) || (a.name.length - b.name.length) })
+  order.forEach(function (g) {
+    const group = g.members.sort(function (a, b) { return (b.count - a.count) || (a.name.length - b.name.length) })
     const main = group[0]
     main.aliases = main.aliases || []
     group.slice(1).forEach(function (o) {
@@ -1209,9 +1247,7 @@ function mergeRegistryAndCalendar_(registry, calendarMap) {
   const out = []
   const unlinked = []
   calendarList.forEach(function (cal) {
-    const loose = looseCustomerKey_(cal.name)
-    const code = registry.nameToCode[normalizeCustomerKey_(cal.name)] ||
-      (loose.length >= LOOSE_KEY_MIN_LENGTH ? registry.looseToCode[loose] : undefined)
+    const code = registry.nameToCode[normalizeCustomerKey_(cal.name)] || resolveRegistryByLooseKey_(registry, cal.name)
     const reg = code && registry.byCode[code]
     if (!reg) { cal.source = 'calendar'; unlinked.push(cal); return }
     if (cal.emphasis && cal.time >= reg.time) { reg.emphasis = cal.emphasis; reg.time = cal.time }
