@@ -31,7 +31,7 @@ export function mergeSuggestions(fromJobs: CustomerSuggestion[], fromCalendar: C
         ...s,
         contactName: cleanValue(s.contactName),
         phone: cleanValue(s.phone),
-        address: cleanValue(s.address),
+        address: cleanAddress(s.address, s.customerName),
     })
 
     const merged = new Map<string, CustomerSuggestion>()
@@ -98,10 +98,25 @@ export function mergeSuggestions(fromJobs: CustomerSuggestion[], fromCalendar: C
 }
 
 // งานเก่าบางงานกรอก "*" "-" ฯลฯ เพื่อข้ามช่องบังคับ ถือว่าเป็นค่าว่าง
-const PLACEHOLDER = /^[\s*\-–—_.'"?]*$|^(ไม่มี|ไม่ระบุ|n\/a)$/i
+// รวมเบอร์ที่เป็นศูนย์ล้วน ("000") ด้วย
+const PLACEHOLDER = /^[\s*\-–—_.'"?]*$|^(ไม่มี|ไม่ระบุ|n\/a)$|^0+$/i
 export const cleanValue = (s?: string): string => {
     const v = (s ?? '').trim()
     return PLACEHOLDER.test(v) ? '' : v
+}
+
+// ที่อยู่ที่เขียนซ้ำเป็นชื่อร้านเอง ไม่ใช่ที่อยู่จริง ถือเป็นค่าว่าง
+export function cleanAddress(address: string | undefined, customerName: string): string {
+    const v = cleanValue(address)
+    return v && normalizeName(v) === normalizeName(customerName) ? '' : v
+}
+
+// ข้อเน้นย้ำมักเป็นหัวข้อสลับกับข้อย่อย ("ใบรายงาน" / "- นำใบรายงานไปด้วย...") ในรายการแนะนำโชว์ข้อย่อยก่อน
+// ถ้าไม่มีข้อย่อยเลย (เขียนเป็นบรรทัดธรรมดา) โชว์บรรทัดแรกๆ แทน
+export function emphasisPreview(emphasis: string, maxLines = 2): string {
+    const lines = emphasis.split('\n').map((l) => l.trim()).filter(Boolean)
+    const bullets = lines.filter((l) => /^([-•*]|\d+[.)])\s*/.test(l)).map((l) => l.replace(/^([-•*]|\d+[.)])\s*/, ''))
+    return (bullets.length ? bullets : lines).slice(0, maxLines).join(' · ')
 }
 
 const normalizeName = (s: string) => s.toLowerCase().replace(/\s+/g, '')
@@ -164,7 +179,7 @@ export function searchCustomers(requests: CustomerSource[], query: string, limit
         group.count += 1
         if (isNewer(r, group.latest)) group.latest = r
         if (cleanValue(r.phone) && isNewer(r, group.withPhone)) group.withPhone = r
-        if (cleanValue(r.address) && isNewer(r, group.withAddress)) group.withAddress = r
+        if (cleanAddress(r.address, r.customerName) && isNewer(r, group.withAddress)) group.withAddress = r
         groups.set(key, group)
     }
 
@@ -180,7 +195,7 @@ export function searchCustomers(requests: CustomerSource[], query: string, limit
             // ผู้ติดต่อกับเบอร์มาจากงานเดียวกันเสมอ
             contactName: withPhone ? cleanValue(withPhone.contactName) : cleanValue(latest.contactName),
             phone: withPhone ? cleanValue(withPhone.phone) : '',
-            address: withAddress ? cleanValue(withAddress.address) : '',
+            address: withAddress ? cleanAddress(withAddress.address, withAddress.customerName) : '',
             jobCount: count,
         }))
 }
