@@ -948,12 +948,26 @@ function parseCalendarEvent_(title, descriptionHtml, location, startTimeMs) {
     emphasis = kept.join('\n').slice(0, 600)
   }
 
+  // ข้อมูลแอร์ในร้าน = บรรทัดใต้หัวข้อ "ข้อมูลแอร์..." จนถึงบรรทัดว่าง (ตัดบรรทัดเรื่องเงิน)
+  let acInfo = ''
+  const acIdx = lines.findIndex(function (l) { return /^ข้อมูลแอร์/.test(l) })
+  if (acIdx !== -1) {
+    const acKept = []
+    for (let i = acIdx + 1; i < lines.length; i++) {
+      const l = lines[i]
+      if (!l || /^(\*|PM\s|QT)/i.test(l)) break  // จบหัวข้อ: บรรทัดว่าง / หัวข้อถัดไป (PM..., *** เน้นย้ำ ***, QT)
+      if (!MONEY_LINE_RE.test(l)) acKept.push(l)
+    }
+    acInfo = acKept.join('\n').slice(0, REGISTRY_LIMITS.AC_TEXT)
+  }
+
   return {
     name: cleanCustomerName_(title),
     contactName: contactName,
     phone: phone,
     address: address,
     emphasis: emphasis,
+    acInfo: acInfo,
     time: startTimeMs || 0
   }
 }
@@ -968,7 +982,7 @@ function mergeCustomer_(map, rec) {
   if (!key) return
   const cur = map[key]
   if (!cur) {
-    map[key] = { name: rec.name, contactName: rec.contactName, phone: rec.phone, address: rec.address, emphasis: rec.emphasis, time: rec.time, count: 1 }
+    map[key] = { name: rec.name, contactName: rec.contactName, phone: rec.phone, address: rec.address, emphasis: rec.emphasis, acInfo: rec.acInfo || '', time: rec.time, count: 1 }
     return
   }
   cur.count += 1
@@ -978,7 +992,7 @@ function mergeCustomer_(map, rec) {
     cur.phone = rec.phone
     cur.contactName = rec.contactName
   }
-  ;['address', 'emphasis'].forEach(function (f) {
+  ;['address', 'emphasis', 'acInfo'].forEach(function (f) {
     if (rec[f] && (newer || !cur[f])) cur[f] = rec[f]
   })
   if (newer) { cur.name = rec.name; cur.time = rec.time }
@@ -1230,6 +1244,7 @@ function groupUnlinkedCalendar_(entries) {
       if (!main.phone && o.phone) { main.phone = o.phone; main.contactName = o.contactName }
       if (!main.address && o.address) main.address = o.address
       if (o.emphasis && (!main.emphasis || o.time > main.time)) main.emphasis = o.emphasis
+      if (o.acInfo && (!main.acInfo || o.time > main.time)) main.acInfo = o.acInfo
       if (o.time > main.time) main.time = o.time
       if (main.aliases.length < REGISTRY_LIMITS.ALIASES && main.aliases.indexOf(o.name) === -1) main.aliases.push(o.name.slice(0, REGISTRY_LIMITS.ALIAS_LENGTH))
     })
@@ -1252,6 +1267,7 @@ function mergeRegistryAndCalendar_(registry, calendarMap) {
     if (!reg) { cal.source = 'calendar'; unlinked.push(cal); return }
     if (cal.emphasis && cal.time >= reg.time) { reg.emphasis = cal.emphasis; reg.time = cal.time }
     if (!reg.phone && cal.phone) { reg.phone = cal.phone; reg.contactName = cal.contactName }
+    if (!reg.acInfo && cal.acInfo) reg.acInfo = cal.acInfo  // ทะเบียนมีข้อมูลแอร์ใช้ของทะเบียน ไม่มีค่อยใช้ของนัดเก่า
     if (!reg.address && cal.address) reg.address = cal.address.slice(0, REGISTRY_LIMITS.ADDRESS)
     if (cal.name !== reg.name && reg.aliases.length < REGISTRY_LIMITS.ALIASES && reg.aliases.indexOf(cal.name) === -1) reg.aliases.push(cal.name.slice(0, REGISTRY_LIMITS.ALIAS_LENGTH))
     reg.source = 'both'
