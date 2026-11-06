@@ -266,3 +266,21 @@ export function pickAiMatch(x: AiExtract, candidates: CustomerSuggestion[]): AiM
     const options = scored.filter((s) => s.score > 0).sort((a, b) => b.score - a.score).slice(0, 3).map((s) => s.c)
     return options.length ? { kind: 'choose', options } : { kind: 'none' }
 }
+
+// ---------- หมายเหตุ: เติมข้อเน้นย้ำของร้านให้ และคืนค่าได้ ----------
+// before = สิ่งที่ผู้ใช้พิมพ์เองก่อนระบบเติม, applied = ค่าที่ระบบเติมแล้ว
+// ถ้าผู้ใช้แก้ต่อ (ค่าปัจจุบันไม่เท่ากับ applied) จะไม่แตะสิ่งที่ผู้ใช้แก้
+export interface AppliedNotes {
+    before: string
+    applied: string
+}
+
+export function applyEmphasisToNotes(current: string, rec: AppliedNotes | null, emphasis?: string): { notes: string; rec: AppliedNotes } {
+    const base = rec && current === rec.applied ? rec.before : current
+    const notes = base || emphasis || ''
+    return { notes, rec: { before: base, applied: notes } }
+}
+
+export function revertNotes(current: string, rec: AppliedNotes | null): string {
+    return rec && current === rec.applied ? rec.before : current
+}
