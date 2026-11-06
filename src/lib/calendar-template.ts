@@ -11,7 +11,7 @@ export const EMPHASIS_MARKERS = ['สำคัญ', 'เน้นย้ำ'] as 
 const MONEY_LINE = new RegExp(MONEY_LINE_SOURCE, 'i')
 const QT_REF = /QT[-\w/]*\d[-\w/]*/gi
 const URL_RE = /https?:\/\/[^\s"'<>]+/i
-const MAX_PLACE_LENGTH = 40
+const MAX_PLACE_LENGTH = 24
 
 // ---------- ชื่อนัด ----------
 
@@ -19,13 +19,19 @@ function shortPlace(address?: string): string {
     const withoutUrl = (address ?? '').replace(URL_RE, '')
     const firstLine = withoutUrl.split('\n')[0]?.trim() ?? ''
     if (!firstLine) return ''
-    return firstLine.length > MAX_PLACE_LENGTH ? `${firstLine.slice(0, MAX_PLACE_LENGTH)}…` : firstLine
+    if (firstLine.length <= MAX_PLACE_LENGTH) return firstLine
+    // ตัดที่ช่องว่าง/จุลภาคตัวสุดท้ายก่อนเกินความยาว ไม่ให้คำขาดกลางคัน (ถ้าไม่มีให้ตัดตรงๆ)
+    const head = firstLine.slice(0, MAX_PLACE_LENGTH)
+    const cut = Math.max(head.lastIndexOf(' '), head.lastIndexOf(','))
+    return `${(cut > 8 ? head.slice(0, cut) : head).replace(/[\s,]+$/, '')}…`
 }
 
 // [ลูกค้า/แบรนด์] สาขา/สถานที่ | งานหลัก
 export function buildEventSummary(customerName: string, address: string | undefined, serviceType: string): string {
+    // ชื่อที่มี [ ] ครอบอยู่แล้ว (เช่น "[KFC] สาขา...") อย่าซ้อนวงเล็บอีกชั้น
+    const name = customerName.trim().replace(/^\[([^\]]*)\]$/, '$1').replace(/[\[\]]/g, '').trim()
     const place = shortPlace(address)
-    return `[${customerName}]${place ? ` ${place}` : ''} | ${serviceType}`
+    return `[${name}]${place ? ` ${place}` : ''} | ${serviceType}`
 }
 
 // ---------- ตัดเรื่องเงิน ----------
