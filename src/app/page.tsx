@@ -6,7 +6,7 @@ import { ref, onValue, set, update, remove } from 'firebase/database'
 import { signInWithCustomToken, signOut } from 'firebase/auth'
 import { auth, db } from '../lib/firebase'
 import { demoRequests } from '../lib/demo-data'
-import { searchCustomers, mergeSuggestions, type CustomerSuggestion } from '../lib/customer-search'
+import { searchCustomers, mergeSuggestions, emphasisPreview, type CustomerSuggestion } from '../lib/customer-search'
 // Types
 type Status = 'new' | 'queue' | 'waiting_quote' | 'checking_parts' | 'order_parts' | 'send_quote' | 'waiting_response' | 'completed' | 'cancelled'
 
@@ -1836,7 +1836,7 @@ export default function Home() {
                               {c.customerCode && ` · ${c.customerCode}`}
                             </div>
                             {c.acInfo && <div className="text-xs text-sky-700 truncate">❄ {(c.acInfo.split('\n')[0] ?? '').replace(/^- /, '')}{c.acInfo.includes('\n') ? ' …' : ''}</div>}
-                            {c.emphasis && <div className="text-xs text-amber-600 truncate">⚠ {c.emphasis.split('\n')[0]}</div>}
+                            {c.emphasis && <div className="text-xs text-amber-600 truncate" title={c.emphasis}>⚠ {emphasisPreview(c.emphasis)}</div>}
                             {c.address && <div className="text-xs text-slate-400 truncate">{c.address}</div>}
                           </button>
                         </li>
