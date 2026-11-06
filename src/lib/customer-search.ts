@@ -199,3 +199,64 @@ export function searchCustomers(requests: CustomerSource[], query: string, limit
             jobCount: count,
         }))
 }
+
+// ---------- จับคู่ร้านอัตโนมัติหลัง AI อ่านข้อความ/รูป/PDF/เสียง ----------
+// AI แยกชื่อ/ที่อยู่/เบอร์ออกมาให้ (เช่น ชื่อ "KFC" + ที่อยู่ "เซ็นทรัลวิลเลจ") ตรงนี้เอาไปเทียบกับรายชื่อที่ค้นได้
+// - เจอร้านเดียวชัดเจน → confident (เติมข้อมูลของร้านให้เลย)
+// - หลายร้านใกล้เคียง/ไม่ชัด → choose (ให้คนเลือก ไม่เดา)
+// - ไม่เจอ → none (ลูกค้าใหม่หรือชื่อไม่ตรง)
+
+export interface AiExtract {
+    customerName?: string
+    address?: string
+    phone?: string
+    contactName?: string
+}
+
+export type AiMatch =
+    | { kind: 'confident'; suggestion: CustomerSuggestion }
+    | { kind: 'choose'; options: CustomerSuggestion[] }
+    | { kind: 'none' }
+
+// คำค้นที่ใช้ดึงตัวเลือกมา: ที่อยู่/ชื่อ/ชื่อ+ที่อยู่/เบอร์ (ตัวค้นต้องการอย่างน้อย 2 ตัวอักษร)
+export function aiQueries(x: AiExtract): string[] {
+    const name = (x.customerName ?? '').trim()
+    const address = (x.address ?? '').trim()
+    const phone = digitsOnly(x.phone ?? '')
+    const queries = [address, name, `${name} ${address}`.trim(), phone.length >= 7 ? phone : '']
+    return [...new Set(queries.filter((q) => normalizeName(q).length >= 2))]
+}
+
+const tokensOf = (s?: string): string[] =>
+    (s ?? '')
+        .toLowerCase()
+        .replace(/สาขา/g, ' ')
+        .replace(/[()[\]'’`.,\-_/]/g, ' ')
+        .split(/\s+/)
+        .filter((t) => t.length >= 2)
+
+export function pickAiMatch(x: AiExtract, candidates: CustomerSuggestion[]): AiMatch {
+    const nameTokens = tokensOf(x.customerName)
+    const addrTokens = tokensOf(x.address)
+    const phone = digitsOnly(x.phone ?? '')
+    const hasAddr = addrTokens.length > 0
+
+    const scored = candidates.map((c) => {
+        const names = normalizeName([c.customerName, ...(c.aliases ?? [])].join(' '))
+        const withAddress = normalizeName(`${[c.customerName, ...(c.aliases ?? [])].join(' ')} ${c.address}`)
+        const nameHit = nameTokens.filter((t) => names.includes(t)).length
+        const addrHit = addrTokens.filter((t) => withAddress.includes(t)).length
+        const nameAll = nameTokens.length > 0 && nameHit === nameTokens.length
+        const phoneHit = phone.length >= 7 && digitsOnly(c.phone).slice(-7) === phone.slice(-7)
+        const strong = phoneHit || (nameAll && hasAddr && addrHit >= 1) || (nameAll && !hasAddr && nameTokens.join('').length >= 8)
+        return { c, score: nameHit * 2 + addrHit * 2 + (phoneHit ? 5 : 0), strong }
+    })
+
+    const strong = scored.filter((s) => s.strong).sort((a, b) => b.score - a.score)
+    const [top, second] = strong
+    if (top && (strong.length === 1 || top.score - (second?.score ?? 0) >= 2)) {
+        return { kind: 'confident', suggestion: top.c }
+    }
+    const options = scored.filter((s) => s.score > 0).sort((a, b) => b.score - a.score).slice(0, 3).map((s) => s.c)
+    return options.length ? { kind: 'choose', options } : { kind: 'none' }
+}

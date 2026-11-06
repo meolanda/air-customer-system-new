@@ -6,7 +6,7 @@ import { ref, onValue, set, update, remove } from 'firebase/database'
 import { signInWithCustomToken, signOut } from 'firebase/auth'
 import { auth, db } from '../lib/firebase'
 import { demoRequests } from '../lib/demo-data'
-import { searchCustomers, mergeSuggestions, emphasisPreview, type CustomerSuggestion } from '../lib/customer-search'
+import { searchCustomers, mergeSuggestions, emphasisPreview, aiQueries, pickAiMatch, type AiExtract, type AiMatch, type CustomerSuggestion } from '../lib/customer-search'
 // Types
 type Status = 'new' | 'queue' | 'waiting_quote' | 'checking_parts' | 'order_parts' | 'send_quote' | 'waiting_response' | 'completed' | 'cancelled'
 
@@ -97,6 +97,9 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState('')
   const [showCustomerSuggest, setShowCustomerSuggest] = useState(false)
   const [calendarSuggestions, setCalendarSuggestions] = useState<CustomerSuggestion[]>([])
+  const [aiMatch, setAiMatch] = useState<AiMatch | null>(null)   // ผลจับคู่ร้านหลัง AI อ่านข้อความ/รูป/PDF/เสียง
+  const [aiMatching, setAiMatching] = useState(false)
+  const [aiRaw, setAiRaw] = useState<AiExtract | null>(null)      // สิ่งที่ AI อ่านได้ (ไว้ย้อนกลับถ้าไม่ใช่ร้านที่จับคู่ได้)
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [viewMode, setViewMode] = useState<'card' | 'table'>('card')
@@ -444,6 +447,45 @@ export default function Home() {
     }
   }, [formData.customerName, editingRequest])
 
+  // เติมข้อมูลร้านจากรายการที่เลือก/ที่ระบบจับคู่ได้ — ai = สิ่งที่ AI อ่านได้จากข้อความงานนี้ (ถ้ามี)
+  // ผู้ติดต่อ/เบอร์ที่ AI อ่านได้เป็นของงานนี้ จึงชนะข้อมูลในทะเบียน (ผู้ติดต่อไปกับเบอร์เดียวกันเสมอ)
+  const applySuggestion = (c: CustomerSuggestion, ai?: AiExtract) => {
+    setFormData(prev => ({
+      ...prev,
+      customerName: c.customerName,
+      contactName: ai?.contactName || (ai?.phone ? '' : c.contactName),
+      phone: ai?.phone || c.phone,
+      address: c.address || ai?.address || '',
+      notes: prev.notes || c.emphasis || '',
+      customerCode: c.customerCode || '',
+      acInfo: c.acInfo || '',
+    }))
+  }
+
+  // หลัง AI อ่านเสร็จ: เอาชื่อ/ที่อยู่/เบอร์ที่ได้ไปค้นทะเบียน+ปฏิทิน+งานเก่า แล้วจับคู่ร้าน
+  // เจอร้านเดียวชัดเจน → เติมให้เลย / ไม่ชัด → ให้เลือก / ไม่เจอ → แจ้งว่าอาจเป็นลูกค้าใหม่
+  const runAiMatch = async (x: AiExtract) => {
+    setAiRaw(x)
+    setAiMatch(null)
+    const queries = aiQueries(x)
+    if (editingRequest || queries.length === 0) return
+    setAiMatching(true)
+    try {
+      const fromServer = (await Promise.all(queries.map((q) =>
+        fetch(`/api/customers/calendar?q=${encodeURIComponent(q)}`)
+          .then((r) => r.json())
+          .then((d) => (Array.isArray(d.results) ? (d.results as CustomerSuggestion[]) : []))
+          .catch(() => [] as CustomerSuggestion[])
+      ))).flat()
+      const fromJobs = queries.flatMap((q) => searchCustomers(requests, q))
+      const match = pickAiMatch(x, mergeSuggestions(fromJobs, fromServer, 30))
+      setAiMatch(match)
+      if (match.kind === 'confident') applySuggestion(match.suggestion, x)
+    } finally {
+      setAiMatching(false)
+    }
+  }
+
   // Stats for dashboard
   const stats = useMemo(() => {
     if (!user) return { total: 0, todo: 0, done: 0 }
@@ -644,6 +686,8 @@ export default function Home() {
 
   const closeModal = () => {
     setIsModalOpen(false)
+    setAiMatch(null)
+    setAiRaw(null)
     setEditingRequest(null)
     setUploadProgress(null)
     setPdfBase64('')
@@ -855,6 +899,7 @@ export default function Home() {
           serviceType: d.serviceType || prev.serviceType,
           description: d.description || prev.description
         }))
+        void runAiMatch({ customerName: d.shopName, contactName: d.contactName, phone: d.phone, address: d.address })
         setActiveAiTab(null)
         alert('AI อ่าน PDF สำเร็จ! ข้อมูลถูกกรอกแล้ว')
       } else {
@@ -893,6 +938,7 @@ export default function Home() {
           priority: result.data.priority || prev.priority,
           description: result.data.description || prev.description
         }))
+        void runAiMatch({ customerName: result.data.customerName, contactName: result.data.contactName, phone: result.data.phone, address: result.data.address })
         setAiText('')
         setActiveAiTab(null) // Close the AI panel after success
       } else {
@@ -943,6 +989,7 @@ export default function Home() {
           serviceType: result.data.serviceType || prev.serviceType,
           description: result.data.description || prev.description
         }))
+        void runAiMatch({ customerName: result.data.shopName || result.data.customerName, contactName: result.data.contactName, phone: result.data.phone, address: result.data.address })
         setAiImageBase64('')
         setActiveAiTab(null) // Close the AI panel after success
       } else {
@@ -1025,6 +1072,7 @@ export default function Home() {
           priority: result.data.priority || prev.priority,
           description: result.data.description || prev.description
         }))
+        void runAiMatch({ customerName: result.data.customerName, contactName: result.data.contactName, phone: result.data.phone, address: result.data.address })
         setVoiceTranscript('')
         setActiveAiTab(null) // Close the AI panel after success
       } else {
@@ -1796,6 +1844,7 @@ export default function Home() {
                     onChange={(e) => {
                       // พิมพ์แก้ชื่อเอง = ไม่ใช่รายการที่เลือกไว้แล้ว ล้างรหัสลูกค้า/ข้อมูลแอร์ กันข้อมูลของร้านอื่นติดไป
                       setFormData(prev => ({ ...prev, customerName: e.target.value, customerCode: '', acInfo: '' }))
+                      setAiMatch(null)
                       setShowCustomerSuggest(true)
                     }}
                     onFocus={() => setShowCustomerSuggest(true)}
@@ -1813,16 +1862,8 @@ export default function Home() {
                             // mouseDown (ไม่ใช่ click) เพื่อให้เลือกได้ก่อน input เสียโฟกัส
                             onMouseDown={(e) => {
                               e.preventDefault()
-                              setFormData(prev => ({
-                                ...prev,
-                                customerName: c.customerName,
-                                contactName: c.contactName,
-                                phone: c.phone,
-                                address: c.address,
-                                notes: prev.notes || c.emphasis || '',
-                                customerCode: c.customerCode || '',
-                                acInfo: c.acInfo || '',
-                              }))
+                              applySuggestion(c)
+                              setAiMatch(null)
                               setShowCustomerSuggest(false)
                             }}
                             className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b last:border-b-0"
@@ -1842,6 +1883,53 @@ export default function Home() {
                         </li>
                       ))}
                     </ul>
+                  )}
+                  {aiMatching && <div className="mt-1 text-xs text-slate-500">🔎 กำลังค้นประวัติร้านนี้...</div>}
+                  {!aiMatching && aiMatch?.kind === 'confident' && (
+                    <div className="mt-1 rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
+                      ✓ พบในทะเบียน: <b>{aiMatch.suggestion.customerName}</b>{aiMatch.suggestion.customerCode && ` (${aiMatch.suggestion.customerCode})`} — เติมข้อมูลร้านให้แล้ว ตรวจก่อนบันทึก
+                      <button
+                        type="button"
+                        className="ml-2 underline"
+                        onClick={() => {
+                          setFormData(prev => ({
+                            ...prev,
+                            customerName: aiRaw?.customerName || '',
+                            contactName: aiRaw?.contactName || '',
+                            phone: aiRaw?.phone || '',
+                            address: aiRaw?.address || '',
+                            customerCode: '',
+                            acInfo: '',
+                          }))
+                          setAiMatch({ kind: 'none' })
+                        }}
+                      >
+                        ไม่ใช่ร้านนี้
+                      </button>
+                    </div>
+                  )}
+                  {!aiMatching && aiMatch?.kind === 'choose' && (
+                    <div className="mt-1 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      พบหลายร้านที่ใกล้เคียง เลือกร้านที่ถูกต้อง:
+                      <div className="mt-1 flex flex-col gap-1">
+                        {aiMatch.options.map((o) => (
+                          <button
+                            key={o.customerName}
+                            type="button"
+                            className="rounded-lg border bg-white px-2 py-1 text-left hover:bg-amber-100"
+                            onClick={() => {
+                              applySuggestion(o, aiRaw ?? undefined)
+                              setAiMatch({ kind: 'confident', suggestion: o })
+                            }}
+                          >
+                            {o.customerName}{o.phone && ` · ${o.phone}`}{o.customerCode && ` · ${o.customerCode}`}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {!aiMatching && aiMatch?.kind === 'none' && (
+                    <div className="mt-1 text-xs text-slate-500">ไม่พบร้านนี้ในทะเบียน — อาจเป็นลูกค้าใหม่หรือชื่อไม่ตรง ตรวจชื่อและที่อยู่ก่อนบันทึก</div>
                   )}
                 </div>
                 <div>
