@@ -24,6 +24,9 @@ interface ServiceRequest {
   contactName?: string   // ผู้ติดต่อ (optional)
   customerCode?: string  // รหัสลูกค้าในทะเบียน Handyman (ถ้าเลือกจากรายการแนะนำ)
   acInfo?: string        // ข้อมูลแอร์ในร้าน (ใส่ในนัดปฏิทิน)
+  machines?: string      // เครื่องเป้าหมาย: ชนิด จำนวน ตำแหน่ง (ใส่ในนัดปฏิทิน)
+  parts?: string         // อะไหล่และอุปกรณ์ที่ต้องเตรียม (ใส่ในนัดปฏิทิน)
+  handover?: string      // ข้อกำหนดส่งมอบงาน (ใส่ในนัดปฏิทิน)
   phone: string
   address: string
   serviceType: string
@@ -138,6 +141,9 @@ export default function Home() {
     contactName: '',
     customerCode: '',
     acInfo: '',
+    machines: '',
+    parts: '',
+    handover: '',
     phone: '',
     address: '',
     serviceType: 'ล้างแอร์',
@@ -616,6 +622,9 @@ export default function Home() {
           contactName: formData.contactName || '',
           customerCode: formData.customerCode || '',
           acInfo: formData.acInfo || '',
+          machines: formData.machines || '',
+          parts: formData.parts || '',
+          handover: formData.handover || '',
           phone: formData.phone || '',
           address: formData.address || '',
           serviceType: formData.serviceType || 'ล้างแอร์',
@@ -672,6 +681,9 @@ export default function Home() {
         contactName: '',
         customerCode: '',
         acInfo: '',
+        machines: '',
+        parts: '',
+        handover: '',
         phone: '',
         address: '',
         serviceType: 'ล้างแอร์',
@@ -2285,6 +2297,34 @@ export default function Home() {
                   placeholder="หมายเหตุเพิ่มเติม"
                 />
               </div>
+
+              <details className="rounded-xl border border-slate-200 px-3 py-2" open={Boolean(formData.machines || formData.parts || formData.handover)}>
+                <summary className="cursor-pointer text-sm font-medium text-slate-700">รายละเอียดสำหรับช่าง (ลงในนัดปฏิทิน)</summary>
+                <div className="mt-2 space-y-2">
+                  <textarea
+                    value={formData.machines || ''}
+                    onChange={(e) => setFormData(prev => ({ ...prev, machines: e.target.value }))}
+                    className="w-full px-3 py-2 border rounded-xl text-sm"
+                    rows={2}
+                    placeholder="เครื่องเป้าหมาย: ชนิด จำนวน ตำแหน่ง (เช่น แอร์แขวน 2 เครื่อง ฝั่งครัว)"
+                  />
+                  <textarea
+                    value={formData.parts || ''}
+                    onChange={(e) => setFormData(prev => ({ ...prev, parts: e.target.value }))}
+                    className="w-full px-3 py-2 border rounded-xl text-sm"
+                    rows={2}
+                    placeholder="อะไหล่และอุปกรณ์ที่ต้องเตรียม"
+                  />
+                  <textarea
+                    value={formData.handover || ''}
+                    onChange={(e) => setFormData(prev => ({ ...prev, handover: e.target.value }))}
+                    className="w-full px-3 py-2 border rounded-xl text-sm"
+                    rows={2}
+                    placeholder="ข้อกำหนดส่งมอบงาน (เช่น ลูกค้าเซ็น + ประทับตรา)"
+                  />
+                  <p className="text-xs text-slate-500">ห้ามใส่ยอดเงิน/ราคา ระบบจะตัดบรรทัดเรื่องเงินออกจากนัดอัตโนมัติ</p>
+                </div>
+              </details>
             </div>
 
             <div className="sticky bottom-0 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t flex gap-2">
