@@ -2289,18 +2289,25 @@ export default function Home() {
               {/* Notes */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">หมายเหตุ</label>
-                <input
-                  type="text"
+                <textarea
                   value={formData.notes || ''}
                   onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
                   className="w-full px-3 py-2 border rounded-xl text-sm"
+                  rows={4}
                   placeholder="หมายเหตุเพิ่มเติม"
                 />
               </div>
 
-              <details className="rounded-xl border border-slate-200 px-3 py-2" open={Boolean(formData.machines || formData.parts || formData.handover)}>
+              <details className="rounded-xl border border-slate-200 px-3 py-2" open={Boolean(formData.acInfo || formData.machines || formData.parts || formData.handover)}>
                 <summary className="cursor-pointer text-sm font-medium text-slate-700">รายละเอียดสำหรับช่าง (ลงในนัดปฏิทิน)</summary>
                 <div className="mt-2 space-y-2">
+                  <textarea
+                    value={formData.acInfo || ''}
+                    onChange={(e) => setFormData(prev => ({ ...prev, acInfo: e.target.value }))}
+                    className="w-full px-3 py-2 border rounded-xl text-sm"
+                    rows={4}
+                    placeholder="ข้อมูลแอร์/อุปกรณ์ในร้าน (ดึงจากประวัติให้อัตโนมัติ แก้ได้)"
+                  />
                   <textarea
                     value={formData.machines || ''}
                     onChange={(e) => setFormData(prev => ({ ...prev, machines: e.target.value }))}
