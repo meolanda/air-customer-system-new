@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import { ref, onValue, set, update, remove } from 'firebase/database'
 import { signInWithCustomToken, signOut } from 'firebase/auth'
 import { auth, db } from '../lib/firebase'
 import { demoRequests } from '../lib/demo-data'
-import { searchCustomers, mergeSuggestions, emphasisPreview, aiQueries, pickAiMatch, type AiExtract, type AiMatch, type CustomerSuggestion } from '../lib/customer-search'
+import { searchCustomers, mergeSuggestions, emphasisPreview, aiQueries, pickAiMatch, applyEmphasisToNotes, revertNotes, type AiExtract, type AiMatch, type AppliedNotes, type CustomerSuggestion } from '../lib/customer-search'
 // Types
 type Status = 'new' | 'queue' | 'waiting_quote' | 'checking_parts' | 'order_parts' | 'send_quote' | 'waiting_response' | 'completed' | 'cancelled'
 
@@ -449,17 +449,25 @@ export default function Home() {
 
   // เติมข้อมูลร้านจากรายการที่เลือก/ที่ระบบจับคู่ได้ — ai = สิ่งที่ AI อ่านได้จากข้อความงานนี้ (ถ้ามี)
   // ผู้ติดต่อ/เบอร์ที่ AI อ่านได้เป็นของงานนี้ จึงชนะข้อมูลในทะเบียน (ผู้ติดต่อไปกับเบอร์เดียวกันเสมอ)
+  // จำค่าหมายเหตุก่อนที่ระบบเติมข้อเน้นย้ำของร้านให้ ไว้คืนค่าเมื่อกด "ไม่ใช่ร้านนี้" หรือเปลี่ยนไปเลือกร้านอื่น
+  // (before = สิ่งที่ผู้ใช้พิมพ์เอง, applied = ค่าที่เติมแล้ว ถ้าผู้ใช้แก้ต่อจะไม่เท่ากัน และไม่แตะสิ่งที่ผู้ใช้แก้)
+  const appliedNotes = useRef<AppliedNotes | null>(null)
+
   const applySuggestion = (c: CustomerSuggestion, ai?: AiExtract) => {
-    setFormData(prev => ({
-      ...prev,
-      customerName: c.customerName,
-      contactName: ai?.contactName || (ai?.phone ? '' : c.contactName),
-      phone: ai?.phone || c.phone,
-      address: c.address || ai?.address || '',
-      notes: prev.notes || c.emphasis || '',
-      customerCode: c.customerCode || '',
-      acInfo: c.acInfo || '',
-    }))
+    setFormData(prev => {
+      const { notes, rec } = applyEmphasisToNotes(prev.notes || '', appliedNotes.current, c.emphasis)
+      appliedNotes.current = rec
+      return {
+        ...prev,
+        customerName: c.customerName,
+        contactName: ai?.contactName || (ai?.phone ? '' : c.contactName),
+        phone: ai?.phone || c.phone,
+        address: c.address || ai?.address || '',
+        notes,
+        customerCode: c.customerCode || '',
+        acInfo: c.acInfo || '',
+      }
+    })
   }
 
   // หลัง AI อ่านเสร็จ: เอาชื่อ/ที่อยู่/เบอร์ที่ได้ไปค้นทะเบียน+ปฏิทิน+งานเก่า แล้วจับคู่ร้าน
@@ -688,6 +696,7 @@ export default function Home() {
     setIsModalOpen(false)
     setAiMatch(null)
     setAiRaw(null)
+    appliedNotes.current = null
     setEditingRequest(null)
     setUploadProgress(null)
     setPdfBase64('')
@@ -1892,15 +1901,21 @@ export default function Home() {
                         type="button"
                         className="ml-2 underline"
                         onClick={() => {
-                          setFormData(prev => ({
-                            ...prev,
-                            customerName: aiRaw?.customerName || '',
-                            contactName: aiRaw?.contactName || '',
-                            phone: aiRaw?.phone || '',
-                            address: aiRaw?.address || '',
-                            customerCode: '',
-                            acInfo: '',
-                          }))
+                          setFormData(prev => {
+                            // คืนหมายเหตุเป็นของเดิม (ข้อเน้นย้ำของร้านที่ไม่ใช่จะไม่ติดไปกับงานนี้) ถ้าผู้ใช้ไม่ได้แก้ต่อ
+                            const notes = revertNotes(prev.notes || '', appliedNotes.current)
+                            appliedNotes.current = null
+                            return {
+                              ...prev,
+                              customerName: aiRaw?.customerName || '',
+                              contactName: aiRaw?.contactName || '',
+                              phone: aiRaw?.phone || '',
+                              address: aiRaw?.address || '',
+                              notes,
+                              customerCode: '',
+                              acInfo: '',
+                            }
+                          })
                           setAiMatch({ kind: 'none' })
                         }}
                       >
