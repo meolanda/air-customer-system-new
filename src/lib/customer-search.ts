@@ -257,6 +257,12 @@ export function pickAiMatch(x: AiExtract, candidates: CustomerSuggestion[]): AiM
     if (top && (strong.length === 1 || top.score - (second?.score ?? 0) >= 2)) {
         return { kind: 'confident', suggestion: top.c }
     }
+    // คะแนนสูสีกัน: ถ้าในกลุ่มสูสีมีร้านจากทะเบียน (มีรหัสลูกค้า) เพียงร้านเดียว ถือว่าอีกแถวเป็นงานเก่าชื่อสะกดต่าง
+    // (เช่น "KFC. เซ็นทรัลวิลเลจ") เลือกชื่อหลักของทะเบียน — ถ้ามีร้านทะเบียนสูสีหลายร้าน (ทะเบียนซ้ำ) ยังให้คนเลือก
+    if (top) {
+        const registryContenders = strong.filter((s) => top.score - s.score < 2 && s.c.customerCode)
+        if (registryContenders.length === 1) return { kind: 'confident', suggestion: registryContenders[0]!.c }
+    }
     const options = scored.filter((s) => s.score > 0).sort((a, b) => b.score - a.score).slice(0, 3).map((s) => s.c)
     return options.length ? { kind: 'choose', options } : { kind: 'none' }
 }
